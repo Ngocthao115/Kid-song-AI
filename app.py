@@ -271,11 +271,38 @@ with tab1:
             refine_hint = st.text_input("Chỉ dẫn refine (tuỳ chọn)", placeholder="VD: tăng tính lặp ở điệp khúc, câu 5–8 từ…")
             refine_btn = st.button("🪄 Refine", use_container_width=True)
         lyrics = st.text_area("Soạn thảo/Chỉnh sửa trước khi tạo nhạc:", value=st.session_state.get("lyrics_text", ""), height=220, key="lyrics_input",)
+        st.session_state["lyrics_text"] = lyrics.strip()
         instrumental = st.toggle("🎼 Chỉ giai điệu (instrumental)", value=False)
         make_music_btn = st.button("🎧 Tạo nhạc", type="primary", use_container_width=True)
         st.markdown('</div>', unsafe_allow_html=True)
 
     # --- Actions ---
+    if make_music_btn:
+        lyr = (lyrics or st.session_state.get("lyrics_text", "")).strip()
+        if not lyr:
+            st.warning("Chưa có lời bài hát để tạo nhạc.")
+            st.stop()
+
+    with st.spinner("Gửi yêu cầu tạo nhạc tới Suno…"):
+        create_res = suno_create_music(lyr, title, style, instrumental)
+
+    audio_url = create_res.get("audio_url")
+    image_url = create_res.get("image_url")
+    job_id    = create_res.get("job_id") or create_res.get("id")
+
+    if (not audio_url) and job_id:
+        with st.spinner("Đang chờ Suno xử lý…"):
+            done = suno_poll_result(job_id)
+        if "error" in done:
+            st.error(f"Tạo nhạc thất bại: {done['error']}")
+        else:
+            audio_url = done.get("audio_url") or done.get("audio")
+            image_url = done.get("image_url") or done.get("image")
+
+    if not audio_url:
+        st.error("Không nhận được audio_url từ Suno – kiểm tra lại endpoint/credit.")
+    else:
+        pass
     if gen_lyrics_btn:
         try:
             with st.spinner("Đang tạo lời…"):
@@ -413,6 +440,7 @@ with tab4:
     - Bật *Instrumental* nếu chỉ muốn giai điệu không lời.
     """)
     st.markdown('</div>', unsafe_allow_html=True)
+
 
 
 
