@@ -44,9 +44,6 @@ from openai import OpenAI
 client = OpenAI(api_key=OPENAI_API_KEY)
 HEADERS = {"Authorization": f"Bearer {SUNO_API_KEY}", "Content-Type": "application/json"}
 
-client  = OpenAI(api_key=OPENAI_API_KEY)
-HEADERS = {"Authorization": f"Bearer {SUNO_API_KEY}", "Content-Type": "application/json"}
-
 # Thư mục xuất
 os.makedirs("outputs", exist_ok=True)
 os.makedirs("outputs/covers", exist_ok=True)
@@ -578,6 +575,7 @@ with tab_settings:
 
 # ============ FOOTER ============
 st.markdown("<br><footer>© Kids Song AI • OpenAI Lyrics + Suno Music</footer>", unsafe_allow_html=True)
+
 
 
 
