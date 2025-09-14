@@ -24,7 +24,6 @@ SUNO_MODEL        = get_secret("SUNO_MODEL", "V4_5")
 SUNO_CALLBACK_URL = get_secret("SUNO_CALLBACK_URL")
 DEFAULT_SUNOSTYLE = get_secret("DEFAULT_SUNOSTYLE", "Kids, cheerful, playful, educational")
 
-# Thông báo thân thiện thay vì assert (trên Cloud không có .env)
 import streamlit as st
 if not OPENAI_API_KEY:
     st.error("Thiếu OPENAI_API_KEY — hãy vào ‘⋯ → Settings → Secrets’ để thêm.")
@@ -309,9 +308,9 @@ with tab_make:
     st.markdown('<div class="card">', unsafe_allow_html=True)
     col1, col2 = st.columns([2, 1])
     with col1:
-        topic = st.text_input("Miêu tả bài hát", st.session_state.topic or "Chú ong chăm chỉ")
-        target_str = st.text_input("Từ ngữ chính (phân tách bởi dấu phẩy)", "chăm học, chăm làm, ai cũng quý")
-        title = st.text_input("Tiêu đề bài hát", st.session_state.title or "Chú ong chăm chỉ")
+        topic = st.text_input("Miêu tả bài hát", st.session_state.topic or "Trường mầm non của bé")
+        target_str = st.text_input("Từ ngữ gợi ý (phân tách bởi dấu phẩy)", "Đồ chơi, sân trường, lớp học, thân thương")
+        title = st.text_input("Tiêu đề bài hát", st.session_state.title or "Trường mầm non của bé")
     with col2:
         verses = st.number_input("Số verse", 1, 4, 2)
         bridge = st.toggle("Thêm Bridge", value=True)
@@ -345,7 +344,7 @@ with tab_make:
     with c1:
         btn_generate = st.button("✨ Tạo lời bài hát", use_container_width=True)
     with c2:
-        refine_hint = st.text_input("Chỉ dẫn refine (tuỳ chọn)", placeholder="Ví dụ: tăng tính lặp ở điệp khúc, giữ câu 5–8 từ…")
+        refine_hint = st.text_input("Chỉ dẫn refine (tuỳ chọn)", placeholder="Ví dụ: Nhập yêu cầu")
     with c3:
         btn_refine = st.button("🪄 Refine", use_container_width=True,
                                disabled=not bool(st.session_state.lyrics.strip()))
@@ -573,8 +572,20 @@ with tab_settings:
     )
     st.markdown('</div>', unsafe_allow_html=True)
 
-# ============ FOOTER ============
-st.markdown("<br><footer>© Kids Song AI • OpenAI Lyrics + Suno Music - Dành cho Giáo viên mầm non</footer>", unsafe_allow_html=True)
+# ===========  FOOTER ===========
+st.markdown("""
+<hr style="margin:24px 0; border:none; border-top:1px solid #e6e8f5;">
+<div style="text-align:center; margin-top:8px; line-height:1.7;">
+  <div style="font-weight:800; font-size:18px;">
+    © Kids Song AI • OpenAI Lyrics + Suno Music – Dành cho Giáo viên mầm non
+  </div>
+  <div style="font-size:15px; color:#64748b;">
+    Ngọc Thảo – <a href="mailto:thaotnp2@fe.edu.vn">thaotnp2@fe.edu.vn</a>
+  </div>
+</div>
+""", unsafe_allow_html=True)
+
+
 
 
 
