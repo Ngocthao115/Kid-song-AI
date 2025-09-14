@@ -1,0 +1,8 @@
+streamlit>=1.36
+pydantic>=2.7
+python-dotenv>=1.0
+numpy>=1.26
+pandas>=2.2
+requests>=2.32
+Pillow>=10.2
+openai>=1.40
