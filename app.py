@@ -250,7 +250,7 @@ def load_history_df():
 
 # ============ 4) UI / THEME ============
 st.set_page_config(page_title="Kids Song AI", page_icon="🎵", layout="centered")
-
+st.markdown('<h1 class="title-red">Kids Song AI</h1>', unsafe_allow_html=True)
 st.markdown(
     """
 <style>
@@ -340,6 +340,7 @@ with tab_make:
     # --- Thanh thao tác
     st.markdown('<div class="card">', unsafe_allow_html=True)
     st.subheader("📝 TIẾN TRÌNH SÁNG TÁC")
+    st.markdown('<h3 class="title-green">📝 TIẾN TRÌNH SÁNG TÁC</h3>', unsafe_allow_html=True)
     c1, c2, c3 = st.columns([1,1,1])
     with c1:
         btn_generate = st.button("✨ Tạo lời bài hát", use_container_width=True)
@@ -584,6 +585,7 @@ st.markdown("""
   </div>
 </div>
 """, unsafe_allow_html=True)
+
 
 
 
