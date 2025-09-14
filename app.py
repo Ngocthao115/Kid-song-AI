@@ -137,11 +137,6 @@ def build_lyrics_prompt(title: str, desc: str, keywords: str, lang: str, verses:
         {"role": "user", "content": user},
     ]
 
-@st.chat_input  # optional: enable quick feedback channel
-
-def _ignore_chat(_=None):
-    return None
-
 def openai_generate_lyrics(title: str, desc: str, keywords: str, lang: str, verses: int, bridge: bool, style: str) -> str:
     msgs = build_lyrics_prompt(title, desc, keywords, lang, verses, bridge, style)
     resp = client.chat.completions.create(
@@ -275,7 +270,7 @@ with tab1:
         with c2:
             refine_hint = st.text_input("Chỉ dẫn refine (tuỳ chọn)", placeholder="VD: tăng tính lặp ở điệp khúc, câu 5–8 từ…")
             refine_btn = st.button("🪄 Refine", use_container_width=True)
-        lyrics = st.text_area("Soạn thảo/Chỉnh sửa trước khi tạo nhạc:", height=220, key="lyrics_box")
+        lyrics = st.text_area("Soạn thảo/Chỉnh sửa trước khi tạo nhạc:", value=st.session_state.get("lyrics_text", ""), height=220, key="lyrics_input",)
         instrumental = st.toggle("🎼 Chỉ giai điệu (instrumental)", value=False)
         make_music_btn = st.button("🎧 Tạo nhạc", type="primary", use_container_width=True)
         st.markdown('</div>', unsafe_allow_html=True)
@@ -285,7 +280,8 @@ with tab1:
         try:
             with st.spinner("Đang tạo lời…"):
                 lyrics_new = openai_generate_lyrics(title, desc, keywords, lang, int(verses), bool(bridge), style)
-            st.session_state["lyrics_box"] = lyrics_new
+            st.session_state["lyrics_text"] = lyrics_new
+            st.rerun()
             st.success("Đã tạo lời bài hát ✨")
         except Exception as e:
             st.error(f"Lỗi tạo lời: {e}")
@@ -294,7 +290,8 @@ with tab1:
         try:
             with st.spinner("Đang refine…"):
                 refined = openai_refine_lyrics(st.session_state["lyrics_box"], refine_hint or "Giữ ngắn gọn, dễ hát, rõ Chorus")
-            st.session_state["lyrics_box"] = refined
+            st.session_state["lyrics_text"] = refined
+            st.rerun()
             st.success("Đã refine lời ✨")
         except Exception as e:
             st.error(f"Lỗi refine: {e}")
@@ -305,7 +302,7 @@ with tab1:
         elif not st.session_state.get("lyrics_box"):
             st.warning("Chưa có lời bài hát để tạo nhạc.")
         else:
-            lyr = st.session_state["lyrics_box"]
+            lyr = st.session_state.get("lyrics_text", "").strip()
             with st.spinner("Gửi yêu cầu tạo nhạc tới Suno…"):
                 create_res = suno_create_music(lyr, title, style, instrumental)
             # Accept both sync & async providers
@@ -416,6 +413,7 @@ with tab4:
     - Bật *Instrumental* nếu chỉ muốn giai điệu không lời.
     """)
     st.markdown('</div>', unsafe_allow_html=True)
+
 
 
 
