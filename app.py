@@ -5,18 +5,44 @@ import streamlit as st
 from dotenv import load_dotenv
 from openai import OpenAI
 
-# ============ 1) CONFIG & ENV ============
-load_dotenv()
-OPENAI_API_KEY    = os.getenv("OPENAI_API_KEY")
-SUNO_API_KEY      = os.getenv("SUNO_API_KEY")
-SUNO_API_BASE     = os.getenv("SUNO_API_BASE", "https://api.sunoapi.org")
-SUNO_MODEL        = os.getenv("SUNO_MODEL", "V4_5")
-SUNO_CALLBACK_URL = os.getenv("SUNO_CALLBACK_URL")
-DEFAULT_SUNOSTYLE = os.getenv("DEFAULT_SUNOSTYLE", "Kids, cheerful, playful, educational")
+# ============ 1) CONFIG & ENV (CLOUD + LOCAL) ===========
+from dotenv import load_dotenv
+load_dotenv()  # Local: đọc .env; Cloud: sẽ ưu tiên st.secrets
 
-assert OPENAI_API_KEY, "Thiếu OPENAI_API_KEY trong .env"
-assert SUNO_API_KEY, "Thiếu SUNO_API_KEY trong .env"
-assert SUNO_CALLBACK_URL, "Thiếu SUNO_CALLBACK_URL trong .env"
+def get_secret(name, default=None):
+    # Ưu tiên secrets trên Streamlit Cloud; nếu không có thì lấy từ biến môi trường (.env)
+    try:
+        import streamlit as st
+        return st.secrets.get(name, os.getenv(name, default))
+    except Exception:
+        return os.getenv(name, default)
+
+OPENAI_API_KEY    = get_secret("OPENAI_API_KEY")
+SUNO_API_KEY      = get_secret("SUNO_API_KEY")
+SUNO_API_BASE     = get_secret("SUNO_API_BASE", "https://api.sunoapi.org")
+SUNO_MODEL        = get_secret("SUNO_MODEL", "V4_5")
+SUNO_CALLBACK_URL = get_secret("SUNO_CALLBACK_URL")
+DEFAULT_SUNOSTYLE = get_secret("DEFAULT_SUNOSTYLE", "Kids, cheerful, playful, educational")
+
+# Thông báo thân thiện thay vì assert (trên Cloud không có .env)
+import streamlit as st
+if not OPENAI_API_KEY:
+    st.error("Thiếu OPENAI_API_KEY — hãy vào ‘⋯ → Settings → Secrets’ để thêm.")
+    st.stop()
+if not SUNO_API_KEY:
+    st.error("Thiếu SUNO_API_KEY — thêm trong Secrets.")
+    st.stop()
+if not SUNO_CALLBACK_URL:
+    st.warning("Chưa có SUNO_CALLBACK_URL — tạm dùng webhook.site để demo.")
+    # Không stop vì app đang poll; có thể vẫn chạy
+
+# Cho SDK/requests đọc từ ENV nếu cần
+os.environ["OPENAI_API_KEY"] = OPENAI_API_KEY
+
+# Client OpenAI (SDK >= 1.40)
+from openai import OpenAI
+client = OpenAI(api_key=OPENAI_API_KEY)
+HEADERS = {"Authorization": f"Bearer {SUNO_API_KEY}", "Content-Type": "application/json"}
 
 client  = OpenAI(api_key=OPENAI_API_KEY)
 HEADERS = {"Authorization": f"Bearer {SUNO_API_KEY}", "Content-Type": "application/json"}
@@ -552,5 +578,6 @@ with tab_settings:
 
 # ============ FOOTER ============
 st.markdown("<br><footer>© Kids Song AI • OpenAI Lyrics + Suno Music</footer>", unsafe_allow_html=True)
+
 
 
