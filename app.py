@@ -250,33 +250,55 @@ def load_history_df():
             return pd.DataFrame(rows, columns=EXPECTED_HEADER)
 
 # ============ 4) UI / THEME ============
-st.set_page_config(page_title="Kids Song AI", page_icon="🎵", layout="centered")
+st.set_page_config(page_title="Kids Song AI", page_icon="🎵", layout="wide")
 
-st.markdown(
-    """
+st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Fredoka:wght@400;600&family=Inter:wght@400;600;700&display=swap');
-:root { --radius: 16px; }
-h1,h2,h3 { font-family: 'Fredoka', system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
-body, p, div, span { font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
-.main .block-container { padding-top: 2rem; padding-bottom: 3rem; max-width: 980px; }
-.card { background:#fff; border-radius:var(--radius); padding:1rem 1.25rem;
-        box-shadow:0 10px 18px rgba(15,23,42,.06); border:1px solid rgba(15,23,42,.06); margin-bottom:1rem; }
-.badge { display:inline-flex; align-items:center; gap:.4rem; padding:.35rem .7rem; border-radius:999px; background:#ECFEFF; color:#0E7490;
-         font-size:.78rem; font-weight:700; letter-spacing:.2px; }
-.stButton>button { border-radius:12px; padding:.6rem 1rem; font-weight:700; }
-.stButton>button[kind="secondary"] { background:#F8FAFC; border:1px solid #E2E8F0; }
-.toolbar { display:flex; gap:.5rem; flex-wrap:wrap; }
-.grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px; }
-.card-sm { border:1px solid #E2E8F0; border-radius:14px; padding:10px; box-shadow:0 4px 10px rgba(15,23,42,.05); }
-.card-sm h4 { margin:.2rem 0 .4rem; font-size:1rem; }
-audio { width:100% !important; }
-footer { color:#94a3b8; font-size:.85rem; }
+/* Tăng bề rộng nội dung */
+.main .block-container{max-width:1200px;padding-top:1.2rem;padding-bottom:4rem;}
+/* Card phong cách “glass” */
+.card{background:rgba(255,255,255,0.9);border:1px solid rgba(107,124,255,0.18);
+      box-shadow:0 8px 24px rgba(107,124,255,0.12);border-radius:18px;padding:18px;}
+/* Nút bo tròn, lớn, full width khi cần */
+.stButton>button{border-radius:14px;font-weight:600;padding:.6rem 1rem}
+.stDownloadButton>button{border-radius:14px;font-weight:600;padding:.6rem 1rem}
+/* Tabs tròn, nổi */
+.stTabs [data-baseweb="tab-list"]{gap:.4rem}
+.stTabs [data-baseweb="tab"]{
+  background:#eef1ff;border-radius:12px;padding:10px 14px;font-weight:600;
+}
+.stTabs [aria-selected="true"]{background:#6b7cff;color:white}
+/* Text input mềm mại */
+.stTextInput>div>div>input,.stTextArea textarea,.stSelectbox>div>div{
+  border-radius:12px!important;
+}
+/* Badge */
+.badge{display:inline-block;padding:.18rem .5rem;border-radius:999px;
+  font-size:.78rem;background:#eef1ff;color:#5860ff;font-weight:700}
+.subtle{color:#64748b}
 </style>
-""",
-    unsafe_allow_html=True,
+""", unsafe_allow_html=True)
 )
-
+# === Hero header ===
+st.markdown("""
+<div class="card" style="padding:20px; margin-bottom:14px;">
+  <div style="display:flex;align-items:center;gap:14px;">
+    <div style="font-size:2rem">🎶</div>
+    <div>
+      <div style="font-size:1.9rem;font-weight:800;
+           background: linear-gradient(90deg,#2b2f77,#6b7cff);
+           -webkit-background-clip:text;background-clip:text;color:transparent;">
+        Kids Song AI
+      </div>
+      <div class="subtle">OpenAI Lyrics · Suno Music · Dành cho giáo viên mầm non</div>
+    </div>
+  </div>
+  <div style="margin-top:10px">
+    <span class="badge">V4_5</span>
+    <span class="badge">Kids • cheerful • gentle</span>
+  </div>
+</div>
+""", unsafe_allow_html=True)
 # ============ 5) STATE ============
 if "lyrics" not in st.session_state: st.session_state.lyrics = ""
 if "title" not in st.session_state: st.session_state.title = ""
@@ -323,15 +345,15 @@ with tab_make:
                 "Kids, gentle, soothing, lullaby, warm",
                 "Kids, cheerful, playful, educational",
                 "Kids, cute pop, claps, ukulele",
-                "Kids, upbeat, bright, classroom sing-along"
-                "Kids lullaby, gentle, calm, emotional, soft piano and strings, warm female vocal"
-                "Instrumental lullaby, gentle, soothing, soft piano + strings, warm and calm"
-                "Kids, bright clear child voice (boy), boy soprano, youthful, innocent tone, light airy timbre"
-                "Young boy vocal, cute and playful, bright and clear, soft dynamics, classroom sing-along"
-                "Childlike male vocal, tender and gentle, warm, no heavy drums, clean mix"
-                "Boy soprano, soft pop for kids, cheerful and sweet, ukulele + glockenspiel"
-                "Lullaby for kids, young boy singer, gentle, soothing, soft piano and strings"
-                "Gentle emotional kids ballad, young boy vocal, warm and tender, minimal percussion"
+                "Kids, upbeat, bright, classroom sing-along",
+                "Kids lullaby, gentle, calm, emotional, soft piano and strings, warm female vocal",
+                "Instrumental lullaby, gentle, soothing, soft piano + strings, warm and calm",
+                "Kids, bright clear child voice (boy), boy soprano, youthful, innocent tone, light airy timbre",
+                "Young boy vocal, cute and playful, bright and clear, soft dynamics, classroom sing-along",
+                "Childlike male vocal, tender and gentle, warm, no heavy drums, clean mix",
+                "Boy soprano, soft pop for kids, cheerful and sweet, ukulele + glockenspiel",
+                "Lullaby for kids, young boy singer, gentle, soothing, soft piano and strings",
+                "Gentle emotional kids ballad, young boy vocal, warm and tender, minimal percussion",
             ],
             index=0,
             help="Chọn style nhạc"
@@ -575,6 +597,7 @@ with tab_settings:
 
 # ============ FOOTER ============
 st.markdown("<br><footer>© Kids Song AI • OpenAI Lyrics + Suno Music</footer>", unsafe_allow_html=True)
+
 
 
 
