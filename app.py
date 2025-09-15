@@ -579,10 +579,11 @@ st.markdown("""
     © Kids Song AI • OpenAI Lyrics + Suno Music – Dành cho Giáo viên mầm non
   </div>
   <div style="font-size:15px; color:#64748b;">
-    Ngọc Thảo – <a href="mailto:thaotnp2@fe.edu.vn">thaotnp2@fe.edu.vn</a>
+    Ngọc Thảo – <a href="mailto:ms.nthaotran@gmail.com">ms.nthaotran@gmail.com</a>
   </div>
 </div>
 """, unsafe_allow_html=True)
+
 
 
 
