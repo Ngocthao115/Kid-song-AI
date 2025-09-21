@@ -1,17 +1,15 @@
-import os, time, json, requests, datetime as dt, csv, re, io, uuid
+import os, time, json, requests, datetime as dt, csv, re, uuid
 from typing import List, Optional
 
 import streamlit as st
 from dotenv import load_dotenv
 from openai import OpenAI
 
-# ============ 1) CONFIG & ENV (CLOUD + LOCAL) ===========
-load_dotenv()  # Local: đọc .env; Cloud: sẽ ưu tiên st.secrets
+# ================== 1) CONFIG & ENV ==================
+load_dotenv()  # Local: đọc .env; Cloud: ưu tiên st.secrets
 
 def get_secret(name, default=None):
-    # Ưu tiên secrets trên Streamlit Cloud; nếu không có thì lấy từ biến môi trường (.env)
     try:
-        import streamlit as st
         return st.secrets.get(name, os.getenv(name, default))
     except Exception:
         return os.getenv(name, default)
@@ -23,70 +21,56 @@ SUNO_MODEL        = get_secret("SUNO_MODEL", "V4_5")
 SUNO_CALLBACK_URL = get_secret("SUNO_CALLBACK_URL")
 DEFAULT_SUNOSTYLE = get_secret("DEFAULT_SUNOSTYLE", "Kids, cheerful, playful, educational")
 
-# --- Supabase (mới): dùng để KHÔNG MẤT thư viện & lịch sử ---
-SUPABASE_URL      = get_secret("SUPABASE_URL")
-SUPABASE_KEY      = get_secret("SUPABASE_KEY")  
-SUPABASE_BUCKET   = get_secret("SUPABASE_BUCKET", "Kids_songs")
-SUPABASE_TABLE    = get_secret("SUPABASE_TABLE", "tracks")
+# Supabase
+SUPABASE_URL    = get_secret("SUPABASE_URL")
+SUPABASE_KEY    = get_secret("SUPABASE_KEY") 
+SUPABASE_BUCKET = get_secret("SUPABASE_BUCKET", "Kids_songs")
+SUPABASE_TABLE  = get_secret("SUPABASE_TABLE", "tracks")
 
-# Client OpenAI (SDK >= 1.40)
 if not OPENAI_API_KEY:
-    st.error("Thiếu OPENAI_API_KEY — hãy vào ‘⋯ → Settings → Secrets’ để thêm.")
+    st.error("Thiếu OPENAI_API_KEY — thêm trong Secrets.")
     st.stop()
 if not SUNO_API_KEY:
     st.error("Thiếu SUNO_API_KEY — thêm trong Secrets.")
     st.stop()
 if not SUNO_CALLBACK_URL:
-    st.warning("Chưa có SUNO_CALLBACK_URL — tạm dùng webhook.site để demo.")
-    # Không stop vì app đang poll; có thể vẫn chạy
+    st.warning("Chưa có SUNO_CALLBACK_URL — có thể bỏ qua (app sẽ poll).")
 
-# Cho SDK/requests đọc từ ENV nếu cần
 os.environ["OPENAI_API_KEY"] = OPENAI_API_KEY
-
 client = OpenAI(api_key=OPENAI_API_KEY)
 HEADERS = {"Authorization": f"Bearer {SUNO_API_KEY}", "Content-Type": "application/json"}
 
-# Kết nối Supabase (nếu cung cấp URL & KEY)
+# Kết nối Supabase
 supabase = None
 supabase_status = "❌"
 if SUPABASE_URL and SUPABASE_KEY:
     try:
-        from supabase import create_client, Client  # pip install supabase
+        from supabase import create_client
         supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
         supabase_status = "✅"
     except Exception as e:
         st.warning(f"Không khởi tạo được Supabase client: {e}")
-        supabase = None
 
-# Thư mục xuất (vẫn giữ lưu local làm cache/phòng hờ)
-os.makedirs("outputs", exist_ok=True)
-os.makedirs("outputs/covers", exist_ok=True)
+# Local output (cache/phòng hờ)
 os.makedirs("outputs/mp3", exist_ok=True)
+os.makedirs("outputs/covers", exist_ok=True)
 HISTORY_CSV = os.path.join("outputs", "tracks.csv")
-
-# ----------- Schema CSV (giữ nguyên) -----------
 EXPECTED_HEADER = [
     "time","title","topic","track_index","audio_url","image_url",
     "style","model","mp3_path","cover_path"
 ]
 
-# ============ 2) PROMPT HỆ THỐNG ============
+# ================== 2) PROMPT HỆ THỐNG ==================
 DEFAULT_LYRICS_SYSTEM = (
     "Bạn là một nhà thơ và nhạc sĩ viết nhạc thiếu nhi chuyên nghiệp cho giáo dục mầm non. "
-    "Hãy sáng tác lời bài hát hoặc dùng câu chuyện, bài thơ thiếu nhi để sáng tác lời bài hát, phù hợp lứa tuổi 3 – 6, tươi vui, tích cực, tình cảm, yêu thương. "
+    "Hãy sáng tác lời bài hát hoặc dùng câu chuyện, bài thơ thiếu nhi để sáng tác lời bài hát, phù hợp lứa tuổi 3–6, tươi vui, tích cực, tình cảm, yêu thương. "
     "Mỗi câu 5–10 từ, vần điệu rõ, từ vựng đơn giản. Có điệp khúc dễ nhớ."
 )
 
-# ============ 3) HÀM NGHIỆP VỤ ============
-def build_user_prompt(
-    topic: str,
-    language: str = "vi",
-    target_words: Optional[List[str]] = None,
-    verses: int = 2,
-    include_bridge: bool = True,
-    min_lines: int = 12,
-    max_lines: int = 18,
-) -> str:
+# ================== 3) HÀM NGHIỆP VỤ ==================
+def build_user_prompt(topic: str, language: str = "vi", target_words: Optional[List[str]] = None,
+                      verses: int = 2, include_bridge: bool = True,
+                      min_lines: int = 12, max_lines: int = 18) -> str:
     tw = ", ".join(target_words) if target_words else "Không bắt buộc"
     structure = ["- Cấu trúc: [Verse 1] → [Chorus]"]
     for i in range(2, verses + 1):
@@ -94,15 +78,10 @@ def build_user_prompt(
     if include_bridge:
         structure.append("→ [Bridge] (ngắn 2–4 dòng) → [Chorus] (kết)")
     return (
-        f"Chủ đề: {topic}\n"
-        f"Ngôn ngữ: {language}\n"
-        "Yêu cầu:\n"
+        f"Chủ đề: {topic}\nNgôn ngữ: {language}\nYêu cầu:\n"
         "- Ngôn ngữ đơn giản, an toàn cho trẻ 3–6 tuổi; tích cực, hồn nhiên.\n"
         "- Vần điệu rõ, nhịp vui tươi hoặc tình cảm nhẹ nhàng, câu ngắn.\n"
-        "- Nội dung giáo dục nhẹ nhàng; khuyến khích hành vi tốt, hoặc tỏ lòng yêu thương và biết ơn.\n"
-        f"{' '.join(structure)}.\n"
-        f"- Từ ngữ chính (nếu lồng được): {tw}\n"
-        f"- Độ dài ~{min_lines}–{max_lines} dòng.\n"
+        f"{' '.join(structure)}.\n- Từ ngữ chính (nếu lồng được): {tw}\n- Độ dài ~{min_lines}–{max_lines} dòng.\n"
         "- Định dạng đầu ra có nhãn [Verse]/[Chorus]/[Bridge].\n"
     )
 
@@ -128,8 +107,7 @@ def refine_lyrics(original_text: str, instruction: str = "") -> str:
         "Hãy chỉnh sửa/đánh bóng lời bài hát thiếu nhi bên dưới, giữ nguyên chủ đề và tinh thần cho trẻ 3–6 tuổi. "
         "Tăng vần điệu, nhịp mượt, chia đoạn rõ [Verse]/[Chorus]/[Bridge]. "
         "Áp dụng nhẹ nhàng chỉ dẫn nếu có, không kéo quá dài.\n\n"
-        f"Chỉ dẫn: {instruction or 'Không có'}\n\n"
-        "Văn bản cần chỉnh:\n" + original_text
+        f"Chỉ dẫn: {instruction or 'Không có'}\n\nVăn bản cần chỉnh:\n" + original_text
     )
     resp = client.chat.completions.create(
         model="gpt-4o-mini",
@@ -164,12 +142,7 @@ def suno_poll(task_id: str, timeout_sec: int = 360, interval_sec: int = 8):
     endpoint = f"{SUNO_API_BASE}/api/v1/generate/record-info"
     t0 = time.time()
     while time.time() - t0 < timeout_sec:
-        r = requests.get(
-            endpoint,
-            headers={"Authorization": f"Bearer {SUNO_API_KEY}"},
-            params={"taskId": task_id},
-            timeout=60,
-        )
+        r = requests.get(endpoint, headers={"Authorization": f"Bearer {SUNO_API_KEY}"}, params={"taskId": task_id}, timeout=60)
         r.raise_for_status()
         data = r.json()
         try:
@@ -187,18 +160,9 @@ def download_bytes(url: str) -> bytes:
     r.raise_for_status()
     return r.content
 
-def sanitize_filename(name: str) -> str:
-    name = re.sub(r"\s+", "_", name.strip())
-    return re.sub(r"[^\w\-\.]", "", name)
-
+# Tên file ASCII an toàn (tránh InvalidKey)
 def ascii_slugify(text: str) -> str:
-    """Chuẩn hoá tên file ASCII an toàn cho Supabase Storage.
-    - Bỏ dấu tiếng Việt (NFKD)
-    - Chỉ giữ [A-Za-z0-9._-]
-    - Thay khoảng trắng → _
-    - Giới hạn độ dài
-    """
-    import unicodedata, re
+    import unicodedata
     text = (text or "").strip().replace(" ", "_")
     text = unicodedata.normalize('NFKD', text)
     text = ''.join(c for c in text if not unicodedata.combining(c))
@@ -206,65 +170,39 @@ def ascii_slugify(text: str) -> str:
     text = text.strip("._-") or "file"
     return text[:80]
 
-# ---------- CSV helpers: migrate & load ----------
+# ---------- CSV helpers ----------
 def ensure_history_schema():
-    """Đảm bảo tracks.csv có header EXPECTED_HEADER. Nếu file cũ (9 cột), tự migrate sang 10 cột."""
     if not os.path.exists(HISTORY_CSV):
-        # tạo file mới với header chuẩn
         with open(HISTORY_CSV, "w", newline="", encoding="utf-8") as f:
-            w = csv.writer(f)
-            w.writerow(EXPECTED_HEADER)
+            csv.writer(f).writerow(EXPECTED_HEADER)
         return
-
-    # Đọc header hiện tại an toàn
     with open(HISTORY_CSV, "r", newline="", encoding="utf-8") as f:
-        reader = csv.reader(f)
-        header = next(reader, None)
-
+        reader = csv.reader(f); header = next(reader, None)
     if header == EXPECTED_HEADER:
-        return  # đúng rồi
-
-    # Migrate: đọc tất cả cũ -> ghi file mới cùng tên với header mới
+        return
     rows_old = []
     with open(HISTORY_CSV, "r", newline="", encoding="utf-8") as f:
-        r = csv.DictReader(f)
-        for row in r:
+        for row in csv.DictReader(f):
             rows_old.append(row)
-
-    tmp_path = HISTORY_CSV + ".tmp"
-    with open(tmp_path, "w", newline="", encoding="utf-8") as f:
-        w = csv.DictWriter(f, fieldnames=EXPECTED_HEADER, quoting=csv.QUOTE_MINIMAL)
-        w.writeheader()
+    tmp = HISTORY_CSV + ".tmp"
+    with open(tmp, "w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=EXPECTED_HEADER); w.writeheader()
         for old in rows_old:
             newrow = {k: old.get(k, "") for k in EXPECTED_HEADER}
-            # Một số file cũ có 'track_index' là float => ép về int nếu cần
             if newrow.get("track_index"):
-                try:
-                    newrow["track_index"] = int(float(newrow["track_index"]))
-                except Exception:
-                    pass
+                try: newrow["track_index"] = int(float(newrow["track_index"]))
+                except Exception: pass
             w.writerow(newrow)
+    os.replace(tmp, HISTORY_CSV)
 
-    os.replace(tmp_path, HISTORY_CSV)  # atomically replace
-
-# --- Supabase helpers (mới) ---
+# ---------- Supabase helpers ----------
 def sb_upload_bytes(bucket: str, path: str, data_bytes: bytes, content_type: str) -> Optional[str]:
-    """Upload bytes lên Supabase Storage và trả về public URL (nếu cấu hình bucket public).
-    Lưu ý: supabase-py v2 kỳ vọng **bytes** hoặc **đường dẫn file**.
-    """
     if not supabase:
         return None
     try:
-        # Truyền thẳng bytes cho client (không dùng BytesIO)
-        supabase.storage.from_(bucket).upload(
-            path,
-            data_bytes,
-            {"contentType": content_type, "upsert": "true"}
-        )
+        supabase.storage.from_(bucket).upload(path, data_bytes, {"contentType": content_type, "upsert": "true"})
         pub = supabase.storage.from_(bucket).get_public_url(path)
-        if isinstance(pub, dict) and "publicUrl" in pub:
-            return pub["publicUrl"]
-        return str(pub)
+        return pub.get("publicUrl") if isinstance(pub, dict) else str(pub)
     except Exception as e:
         st.warning(f"Upload Supabase thất bại ({path}): {e}")
         return None
@@ -273,13 +211,11 @@ def supabase_upsert_track(row: dict) -> None:
     if not supabase:
         return
     try:
-        # Thử upsert theo schema mở rộng (CSV cũ)
         supabase.table(SUPABASE_TABLE).upsert(row, on_conflict="time,track_index").execute()
-        return
     except Exception as e1:
-        # Fallback: schema tối giản (id, title, style, lyrics_url, audio_url, cover_url, created_at, uploader)
+        # Fallback cho bảng tối giản (id,title,style,lyrics_url,audio_url,cover_url,created_at,uploader)
         try:
-            simple_row = {
+            simple = {
                 "id": str(uuid.uuid4()),
                 "title": row.get("title", ""),
                 "style": row.get("style", ""),
@@ -289,117 +225,82 @@ def supabase_upsert_track(row: dict) -> None:
                 "created_at": dt.datetime.utcnow().isoformat(),
                 "uploader": "kids-song-ai",
             }
-            supabase.table(SUPABASE_TABLE).insert(simple_row).execute()
-            st.info("Đã chèn bản ghi")
+            supabase.table(SUPABASE_TABLE).insert(simple).execute()
         except Exception as e2:
-            st.warning("Ghi bản ghi Supabase thất bại (cả 2 schema): " + str(e1) + " | " + str(e2) + "Hãy kiểm tra lại cột bảng hoặc đổi SUPABASE_TABLE cho khớp.")
-
+            st.warning("Ghi Supabase thất bại (cả 2 schema): " + str(e1) + " | " + str(e2))
 
 def write_history_row(row: dict) -> None:
-    # Ghi CSV local (giữ nguyên)
     ensure_history_schema()
     with open(HISTORY_CSV, "a", newline="", encoding="utf-8") as f:
-        w = csv.DictWriter(f, fieldnames=EXPECTED_HEADER, quoting=csv.QUOTE_MINIMAL)
-        w.writerow({k: row.get(k, "") for k in EXPECTED_HEADER})
-    # Ghi Supabase (mới)
+        w = csv.DictWriter(f, fieldnames=EXPECTED_HEADER); w.writerow({k: row.get(k, "") for k in EXPECTED_HEADER})
     supabase_upsert_track(row)
 
-
 def load_history_df_local():
-    """Đọc CSV về DataFrame, có fallback để không vỡ UI nếu dữ liệu lẫn cột."""
     import pandas as pd
     ensure_history_schema()
     try:
         return pd.read_csv(HISTORY_CSV, dtype=str, keep_default_na=False)
     except Exception:
-        try:
-            # fallback engine python, bỏ dòng xấu
-            return pd.read_csv(HISTORY_CSV, dtype=str, keep_default_na=False, engine="python", on_bad_lines="skip")
-        except Exception:
-            # đọc thủ công -> DataFrame
-            with open(HISTORY_CSV, "r", newline="", encoding="utf-8") as f:
-                r = csv.DictReader(f)
-                rows = [row for row in r]
-            if not rows:
-                import pandas as pd
-                return pd.DataFrame(columns=EXPECTED_HEADER)
-            import pandas as pd
-            # Bảo đảm đủ cột
-            for r_ in rows:
-                for k in EXPECTED_HEADER:
-                    r_.setdefault(k, "")
-            return pd.DataFrame(rows, columns=EXPECTED_HEADER)
-
+        return pd.DataFrame(columns=EXPECTED_HEADER)
 
 def load_history_df_supabase():
-    """Ưu tiên đọc lịch sử từ Supabase table nếu có, fallback None nếu lỗi/chưa cấu hình."""
     if not supabase:
         return None
     try:
         res = supabase.table(SUPABASE_TABLE).select("*").execute()
         rows = res.data or []
         import pandas as pd
-        # Không ép cột về EXPECTED_HEADER cứng;
-        df = pd.DataFrame(rows)
-        return df
+        return pd.DataFrame(rows)
     except Exception as e:
         st.warning(f"Không tải được lịch sử từ Supabase: {e}")
         return None
 
-        except Exception as e:
-            st.error(str(e))
-            
-# ============ 4) UI / THEME ============
+# ================== 4) UI / THEME ==================
 st.set_page_config(page_title="Kids Song AI", page_icon="🎵", layout="centered")
-st.markdown("""
+st.markdown(
+    """
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Fredoka:wght@400;600&family=Inter:wght@400;600;700&display=swap');
 :root { --radius: 16px; }
 h1,h2,h3 { font-family: 'Fredoka', system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
 body, p, div, span { font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
 .main .block-container { padding-top: 2rem; padding-bottom: 3rem; max-width: 980px; }
-.card { background:#fff; border-radius:var(--radius); padding:1rem 1.25rem;
-        box-shadow:0 10px 18px rgba(15,23,42,.06); border:1px solid rgba(15,23,42,.06); margin-bottom:1rem; }
-.badge { display:inline-flex; align-items:center; gap:.4rem; padding:.35rem .7rem; border-radius:999px; background:#ECFEFF; color:#0E7490;
-         font-size:.78rem; font-weight:700; letter-spacing:.2px; }
+.card { background:#fff; border-radius:var(--radius); padding:1rem 1.25rem; box-shadow:0 10px 18px rgba(15,23,42,.06); border:1px solid rgba(15,23,42,.06); margin-bottom:1rem; }
+.badge { display:inline-flex; align-items:center; gap:.4rem; padding:.35rem .7rem; border-radius:999px; background:#ECFEFF; color:#0E7490; font-size:.78rem; font-weight:700; letter-spacing:.2px; }
 .stButton>button { border-radius:12px; padding:.6rem 1rem; font-weight:700; }
-.toolbar { display:flex; gap:.5rem; flex-wrap:wrap; }
-.grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px; }
 .card-sm { border:1px solid #E2E8F0; border-radius:14px; padding:10px; box-shadow:0 4px 10px rgba(15,23,42,.05); }
 .status { font-size:.85rem; color:#0f172a; background:#F1F5F9; border:1px solid #E2E8F0; padding:.25rem .5rem; border-radius:8px; }
 </style>
-""", unsafe_allow_html=True)
+""",
+    unsafe_allow_html=True,
+)
 
-# ============ 5) STATE ============
+# State
 if "lyrics" not in st.session_state: st.session_state.lyrics = ""
 if "title" not in st.session_state: st.session_state.title = ""
 if "topic" not in st.session_state: st.session_state.topic = ""
 if "targets" not in st.session_state: st.session_state.targets = []
 if "generated" not in st.session_state: st.session_state.generated = False
 
-# — Sidebar
+# Sidebar
 with st.sidebar:
     st.markdown("## 👩‍🏫 Hướng dẫn nhanh")
-    st.markdown("- **Bước 1:** Nhập Miêu tả/Từ khóa/Title → **Tạo lời**.  \n"
-                "- **Bước 2:** Chỉnh tay hoặc **Refine**.  \n"
-                "- **Bước 3:** **Tạo nhạc**, xem ảnh bìa & tải file.  \n"
-                "  Xem lại ở **📚 Thư viện** hoặc **🗂️ Lịch sử**.")
+    st.markdown("- **Bước 1:** Nhập Miêu tả/Từ khóa/Title → **Tạo lời**.\n- **Bước 2:** Chỉnh tay hoặc **Refine**.\n- **Bước 3:** **Tạo nhạc**, xem ảnh bìa & tải file.\n- Xem lại ở **📚 Thư viện** hoặc **🗂️ Lịch sử**.")
     st.divider()
     st.caption(f"Model Suno: **{SUNO_MODEL}**")
     st.caption(f"Style mặc định: **{DEFAULT_SUNOSTYLE}**")
     st.caption(f"Supabase: <span class='status'>{supabase_status}</span>", unsafe_allow_html=True)
 
-# — Header
+# Header & Tabs
 st.title("🎵 Kids Song AI")
 st.markdown('<span class="badge">OpenAI Lyrics • Suno Music</span>', unsafe_allow_html=True)
 
-# — Tabs
 tab_make, tab_library, tab_history, tab_settings = st.tabs(["✨ Tạo bài hát", "📚 Thư viện", "🗂️ Lịch sử", "⚙️ Cài đặt"])
 
-# ============ TAB 1: Tạo bài hát (phần đầu nhập liệu) ============
+# ================== TAB 1: TẠO BÀI HÁT ==================
 with tab_make:
     st.markdown('<div class="card">', unsafe_allow_html=True)
-    col1, col2 = st.columns([2, 1])
+    col1, col2 = st.columns([2,1])
     with col1:
         topic = st.text_input("Miêu tả bài hát", st.session_state.topic or "Trường mầm non của bé")
         target_str = st.text_input("Từ ngữ gợi ý (phân tách bởi dấu phẩy)", "Đồ chơi, sân trường, lớp học, thân thương")
@@ -425,44 +326,43 @@ with tab_make:
     with c2:
         refine_hint = st.text_input("Chỉ dẫn refine (tuỳ chọn)", placeholder="Ví dụ: nhịp nhanh hơn, thêm điệp khúc…")
     with c3:
-        btn_refine = st.button("🪄 Refine", use_container_width=True,
-                               disabled=not bool(st.session_state.lyrics.strip()))
+        btn_refine = st.button("🪄 Refine", use_container_width=True, disabled=not bool(st.session_state.lyrics.strip()))
+
     if btn_generate:
-        targets = [w.strip() for w in target_str.split(",") if w.strip()]
-        with st.spinner("Đang sáng tác lời..."):
-            st.session_state.lyrics = generate_lyrics(topic, targets, language=language, verses=verses, bridge=bridge)
-        st.session_state.title = title; st.session_state.topic = topic; st.session_state.targets = targets
-        st.success("Đã sinh lời. Chỉnh sửa trực tiếp hoặc bấm Refine.")
+        try:
+            targets = [w.strip() for w in target_str.split(",") if w.strip()]
+            with st.spinner("Đang sáng tác lời..."):
+                lyrics = generate_lyrics(topic, targets, language=language, verses=verses, bridge=bridge)
+            st.session_state.lyrics = lyrics
+            st.session_state.title = title
+            st.session_state.topic = topic
+            st.session_state.targets = targets
+            st.session_state.generated = True
+            st.success("Đã sinh lời. Chỉnh sửa trực tiếp hoặc bấm Refine.")
+        except Exception as e:
+            st.error(str(e))
+
     if btn_refine and st.session_state.lyrics.strip():
-        with st.spinner("Đang chỉnh sửa lời..."):
-            st.session_state.lyrics = refine_lyrics(st.session_state.lyrics, refine_hint)
-        st.success("Đã refine lời bài hát.")
+        try:
+            with st.spinner("Đang chỉnh sửa lời..."):
+                st.session_state.lyrics = refine_lyrics(st.session_state.lyrics, refine_hint)
+            st.success("Đã refine lời bài hát.")
+        except Exception as e:
+            st.error(str(e))
 
-    # Ô soạn thảo lời (luôn hiển thị)
-    st.session_state.lyrics = st.text_area(
-        "Soạn thảo/Chỉnh sửa tại đây trước khi tạo nhạc:",
-        value=st.session_state.lyrics, height=320
-    )
+    st.session_state.lyrics = st.text_area("Soạn thảo/Chỉnh sửa tại đây trước khi tạo nhạc:", value=st.session_state.lyrics, height=320)
 
-    # Nút sinh nhạc Suno
     st.divider()
-    left, right = st.columns([1, 2])
+    left, right = st.columns([1,2])
     with left:
         instrumental = st.toggle("Chỉ giai điệu (instrumental)", value=False)
     with right:
-        btn_music = st.button("🎧 Tạo nhạc", use_container_width=True,
-                              disabled=not bool(st.session_state.lyrics.strip()))
+        btn_music = st.button("🎧 Tạo nhạc", use_container_width=True, disabled=not bool(st.session_state.lyrics.strip()))
 
-    # ========== KẾT QUẢ + ẢNH BÌA GẮN TRONG TRANG ==========
     if btn_music and st.session_state.lyrics.strip():
         try:
             with st.spinner("Đang tạo bài hát..."):
-                task_id = suno_generate_song(
-                    st.session_state.lyrics,
-                    st.session_state.title or "Kids Song",
-                    style=style,
-                    instrumental=instrumental
-                )
+                task_id = suno_generate_song(st.session_state.lyrics, st.session_state.title or "Kids Song", style=style, instrumental=instrumental)
                 tracks = suno_poll(task_id)
 
             st.subheader("🎧 Kết quả")
@@ -472,44 +372,32 @@ with tab_make:
             for i, t in enumerate(tracks, 1):
                 audio_url_orig = t.get("audioUrlHigh") or t.get("audioUrl")
                 image_url_orig = t.get("imageUrl")
-                mp3_path = ""
-                cover_path = ""
+                mp3_path = cover_path = ""
 
-                # Lưu file mp3 & cover vào outputs/
-                audio_bytes = b""
-                img_bytes = b""
+                audio_bytes = img_bytes = b""
                 if audio_url_orig:
                     audio_bytes = download_bytes(audio_url_orig)
                     mp3_path = f"outputs/mp3/{ts}_{i}_{base}.mp3"
-                    with open(mp3_path, "wb") as f:
-                        f.write(audio_bytes)
-
+                    with open(mp3_path, "wb") as f: f.write(audio_bytes)
                 if image_url_orig:
                     img_bytes = download_bytes(image_url_orig)
                     cover_path = f"outputs/covers/{ts}_{i}_{base}.jpg"
-                    with open(cover_path, "wb") as f:
-                        f.write(img_bytes)
+                    with open(cover_path, "wb") as f: f.write(img_bytes)
 
-                # --- NEW: Upload lên Supabase Storage (nếu có) ---
-                audio_url_pub = None
-                image_url_pub = None
+                # Upload Storage
                 lyrics_url_pub = None
                 if st.session_state.get("lyrics"):
                     try:
                         lyrics_url_pub = sb_upload_bytes(SUPABASE_BUCKET, f"lyrics/{ts}_{i}_{base}.txt", st.session_state.lyrics.encode("utf-8"), "text/plain")
-                    except Exception:
-                        pass
-                if audio_bytes:
-                    audio_url_pub = sb_upload_bytes(SUPABASE_BUCKET, f"mp3/{ts}_{i}_{base}.mp3", audio_bytes, "audio/mpeg")
-                if img_bytes:
-                    image_url_pub = sb_upload_bytes(SUPABASE_BUCKET, f"covers/{ts}_{i}_{base}.jpg", img_bytes, "image/jpeg")
+                    except Exception: pass
+                audio_url_pub = sb_upload_bytes(SUPABASE_BUCKET, f"mp3/{ts}_{i}_{base}.mp3", audio_bytes, "audio/mpeg") if audio_bytes else None
+                image_url_pub = sb_upload_bytes(SUPABASE_BUCKET, f"covers/{ts}_{i}_{base}.jpg", img_bytes, "image/jpeg") if img_bytes else None
 
-                # Ưu tiên sử dụng URL trên Supabase để không mất dữ liệu
                 audio_url_final = audio_url_pub or audio_url_orig or ""
                 image_url_final = image_url_pub or image_url_orig or ""
 
-                # Hiển thị card kết quả: ảnh bìa + player + nút tải
-                k1, k2 = st.columns([1, 2])
+                # UI kết quả
+                k1, k2 = st.columns([1,2])
                 with k1:
                     if cover_path and os.path.exists(cover_path):
                         st.image(cover_path, caption="Ảnh bìa", use_container_width=True)
@@ -518,16 +406,13 @@ with tab_make:
                 with k2:
                     st.write(f"**{st.session_state.title or 'Kids Song'} — Bản {i}**")
                     if mp3_path and os.path.exists(mp3_path):
+                        with open(mp3_path, "rb") as f: st.audio(f.read(), format="audio/mp3")
                         with open(mp3_path, "rb") as f:
-                            st.audio(f.read(), format="audio/mp3")
-                        with open(mp3_path, "rb") as f:
-                            st.download_button("⬇️ Tải MP3", data=f, file_name=os.path.basename(mp3_path),
-                                               mime="audio/mpeg", use_container_width=True,
-                                               key=f"dl_now_{ts}_{i}")
+                            st.download_button("⬇️ Tải MP3", data=f, file_name=os.path.basename(mp3_path), mime="audio/mpeg", use_container_width=True, key=f"dl_now_{ts}_{i}")
                     elif audio_url_final:
                         st.audio(audio_url_final, format="audio/mp3")
 
-                # Lưu lịch sử (CSV + Supabase table)
+                # Lưu lịch sử
                 row = {
                     "time": ts,
                     "title": st.session_state.title or "Kids Song",
@@ -543,31 +428,25 @@ with tab_make:
                 }
                 write_history_row(row)
 
-            st.balloons()
-            st.info("Đã lưu vào Supabase và thư mục local. Xem ở tab 📚 Thư viện.")
+            st.balloons(); st.info("Đã lưu vào Supabase và thư mục local. Xem ở tab 📚 Thư viện.")
         except Exception as e:
             st.error(str(e))
 
     st.markdown('</div>', unsafe_allow_html=True)
 
-# ============ TAB 2: THƯ VIỆN (GALLERY) ============
+# ================== TAB 2: THƯ VIỆN ==================
 with tab_library:
     st.markdown('<div class="card">', unsafe_allow_html=True)
     st.markdown("### 📚 Thư viện (Gallery)")
     data_source = "local"
 
-    # Ưu tiên lấy từ Supabase; nếu không có thì lấy từ CSV local
     df = load_history_df_supabase()
     if df is not None and len(df) > 0:
         data_source = "supabase"
     if (df is None) or (len(df) == 0):
         if os.path.exists(HISTORY_CSV):
-            try:
-                import pandas as pd
-                df = load_history_df_local()
-            except Exception as e:
-                st.error("Không đọc được thư viện: " + str(e))
-                df = None
+            import pandas as pd
+            df = load_history_df_local()
         else:
             df = None
 
@@ -575,27 +454,27 @@ with tab_library:
         st.info("Chưa có dữ liệu. Hãy tạo bài hát ở tab ✨ trước nhé.")
     else:
         try:
-            # Mới nhất trước
             if "time" in df.columns and "track_index" in df.columns:
                 df = df.sort_values(by=["time","track_index"], ascending=[False, True]).reset_index(drop=True)
 
-            # Bộ lọc nhanh
             colf1, colf2 = st.columns([2,1])
             with colf1:
                 q = st.text_input("Tìm theo tiêu đề/chủ đề", "")
             with colf2:
-                style_vals = sorted([s for s in df.get("style", []).dropna().unique().tolist()]) if "style" in df.columns else []
+                if "style" in df.columns:
+                    style_vals = sorted([s for s in df["style"].dropna().unique().tolist()])
+                else:
+                    style_vals = []
                 style_pick = st.selectbox("Lọc theo style", ["Tất cả"] + style_vals)
+
             if q and "title" in df.columns and "topic" in df.columns:
                 mask = df["title"].str.contains(q, case=False, na=False) | df["topic"].str.contains(q, case=False, na=False)
                 df = df[mask]
             if style_pick and style_pick != "Tất cả" and "style" in df.columns:
                 df = df[df["style"] == style_pick]
 
-            # Hiển thị nguồn dữ liệu
             st.caption(f"Nguồn dữ liệu: **{'Supabase' if data_source=='supabase' else 'Local CSV'}**")
 
-            # Grid gallery
             if len(df) == 0:
                 st.info("Chưa có bài nào khớp bộ lọc.")
             else:
@@ -609,7 +488,6 @@ with tab_library:
                         title = row.get("title") or "Kids Song"
                         subtitle = f"{row.get('time','')} • Bản {int(float(row.get('track_index', 1)))}" if row.get('track_index') else f"{row.get('time','')}"
 
-                        # ảnh bìa
                         if cover and os.path.exists(cover):
                             st.image(cover, use_container_width=True)
                         elif image_url:
@@ -619,16 +497,12 @@ with tab_library:
 
                         st.markdown(f"<h4>{title}</h4><div style='color:#64748b'>{subtitle}</div>", unsafe_allow_html=True)
 
-                        # audio
                         mp3_path = (row.get("mp3_path") or "").strip()
                         audio_url = (row.get("audio_url") or "").strip()
                         if mp3_path and os.path.exists(mp3_path):
+                            with open(mp3_path, "rb") as f: st.audio(f.read(), format="audio/mp3")
                             with open(mp3_path, "rb") as f:
-                                st.audio(f.read(), format="audio/mp3")
-                            with open(mp3_path, "rb") as f:
-                                st.download_button("⬇️ Tải MP3", data=f, file_name=os.path.basename(mp3_path),
-                                                   mime="audio/mpeg", use_container_width=True,
-                                                   key=f"dl_lib_{row.get('time','')}_{int(float(row.get('track_index', idx%4+1)))}_{idx}")
+                                st.download_button("⬇️ Tải MP3", data=f, file_name=os.path.basename(mp3_path), mime="audio/mpeg", use_container_width=True, key=f"dl_lib_{row.get('time','')}_{int(float(row.get('track_index', idx%4+1)))}_{idx}")
                         elif audio_url:
                             st.audio(audio_url, format="audio/mp3")
 
@@ -638,42 +512,32 @@ with tab_library:
 
     st.markdown('</div>', unsafe_allow_html=True)
 
-# ============ TAB 3: LỊCH SỬ ============
+# ================== TAB 3: LỊCH SỬ ==================
 with tab_history:
-    # Ưu tiên lấy từ Supabase; nếu không có thì lấy CSV
     df_hist = load_history_df_supabase()
     if (df_hist is None or len(df_hist) == 0) and os.path.exists(HISTORY_CSV):
         df_hist = load_history_df_local()
 
     if df_hist is not None and len(df_hist) > 0:
+        st.markdown('<div class="card">', unsafe_allow_html=True)
+        st.markdown("### 🗂️ Lịch sử tạo nhạc (bảng)")
+        st.dataframe(df_hist, use_container_width=True, height=360)
         try:
-            import pandas as pd
-            st.markdown('<div class="card">', unsafe_allow_html=True)
-            st.markdown("### 🗂️ Lịch sử tạo nhạc (bảng)")
-            st.dataframe(df_hist, use_container_width=True, height=360)
-            st.download_button(
-                "⬇️ Tải CSV lịch sử",
-                df_hist.to_csv(index=False).encode("utf-8"),
-                file_name="tracks_history.csv",
-                mime="text/csv",
-                use_container_width=True,
-            )
-            st.markdown('</div>', unsafe_allow_html=True)
-        except Exception as e:
-            st.error("Không đọc được bài trước: " + str(e))
+            st.download_button("⬇️ Tải CSV lịch sử", df_hist.to_csv(index=False).encode("utf-8"), file_name="tracks_history.csv", mime="text/csv", use_container_width=True)
+        except Exception:
+            pass
+        st.markdown('</div>', unsafe_allow_html=True)
     else:
         st.info("Chưa có bài hát nào. Tạo bài hát ở tab ✨ trước nhé.")
 
-# ============ TAB 4: CÀI ĐẶT ============
+# ================== TAB 4: CÀI ĐẶT ==================
 with tab_settings:
     st.markdown('<div class="card">', unsafe_allow_html=True)
     st.markdown("### ✅ Kiểm tra Supabase")
-    # Công cụ kiểm tra trực tiếp trong app
     colsb1, colsb2 = st.columns(2)
     with colsb1:
         if supabase:
             try:
-                # Đếm số bản ghi trong bảng nhanh (không tải dữ liệu)
                 res = supabase.table(SUPABASE_TABLE).select('*', count='exact').range(0,0).execute()
                 total_rows = res.count or 0
             except Exception:
@@ -683,22 +547,20 @@ with tab_settings:
             st.info("Chưa cấu hình Supabase URL/KEY")
     with colsb2:
         if supabase:
-            # Nút liệt kê file trong Storage và nút upload file test
-            btn_list = st.button("🔎 Liệt kê Storage (mp3/ & covers/)", use_container_width=True)
+            btn_list  = st.button("🔎 Liệt kê Storage (mp3/ & covers/)", use_container_width=True)
             btn_probe = st.button("🧪 Upload file test", use_container_width=True)
-                        if btn_probe:
+            if btn_probe:
                 try:
                     ts = dt.datetime.utcnow().strftime('%Y%m%d-%H%M%S')
-                    test_path = f"tests/{ts}_hello.txt"
-                    puburl = sb_upload_bytes(SUPABASE_BUCKET, test_path, b"hello from Kids Song AI", "text/plain")
+                    p = f"tests/{ts}_hello.txt"
+                    puburl = sb_upload_bytes(SUPABASE_BUCKET, p, b"hello from Kids Song AI", "text/plain")
                     if puburl:
-                        st.success("Đã upload file test: ")
-                        st.markdown(f"- `{test_path}` → [Mở file]({puburl})")
+                        st.success("Đã upload file test:")
+                        st.markdown(f"- `{p}` → [Mở file]({puburl})")
                     else:
                         st.warning("Upload test không thành công (xem cảnh báo ở trên nếu có).")
                 except Exception as e:
                     st.warning(f"Lỗi upload test: {e}")
-                            resync_local_to_supabase(limit=5)
             if btn_list:
                 try:
                     mp3_files = supabase.storage.from_(SUPABASE_BUCKET).list("mp3") or []
@@ -722,14 +584,11 @@ with tab_settings:
 
     st.divider()
     st.markdown("### 🎨 Preset chủ đề nhanh")
-    preset = st.selectbox(
-        "Chọn nhanh",
-        [
-            "Màu sắc cơ bản","Hình tròn – vuông – tam giác","Số đếm 1 – 10","Vệ sinh răng miệng",
-            "Chào hỏi & phép lịch sự","An toàn giao thông","Con vật","Gia đình","Nghề nghiệp",
-            "Trường mầm non","Bản thân bé","Thầy cô và bạn bè"
-        ],
-    )
+    preset = st.selectbox("Chọn nhanh", [
+        "Màu sắc cơ bản","Hình tròn – vuông – tam giác","Số đếm 1 – 10","Vệ sinh răng miệng",
+        "Chào hỏi & phép lịch sự","An toàn giao thông","Con vật","Gia đình","Nghề nghiệp",
+        "Trường mầm non","Bản thân bé","Thầy cô và bạn bè"
+    ])
     st.caption("Chọn preset rồi copy sang tab ✨.")
 
     st.divider()
@@ -740,21 +599,14 @@ with tab_settings:
     )
     st.markdown('</div>', unsafe_allow_html=True)
 
-# ===========  FOOTER ===========
+# ================== FOOTER ==================
 st.markdown("""
 <hr style="margin:24px 0; border:none; border-top:1px solid #e6e8f5;">
 <div style="text-align:center; margin-top:8px; line-height:1.7;">
-  <div style="font-weight:800; font-size:18px;">
-    © Kids Song AI • OpenAI Lyrics + Suno Music – Dành cho Giáo viên mầm non
-  </div>
-  <div style="font-size:15px; color:#64748b;">
-    Ngọc Thảo – <a href="mailto:ms.nthaotran@gmail.com">ms.nthaotran@gmail.com</a>
-  </div>
+  <div style="font-weight:800; font-size:18px;">© Kids Song AI • OpenAI Lyrics + Suno Music • Supabase Persist</div>
+  <div style="font-size:15px; color:#64748b;">Ngọc Thảo – <a href=\"mailto:ms.nthaotran@gmail.com\">ms.nthaotran@gmail.com</a></div>
 </div>
 """, unsafe_allow_html=True)
-
-
-
 
 
 
