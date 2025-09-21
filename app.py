@@ -494,7 +494,7 @@ with tab_make:
                 image_url = t.get("imageUrl")
                 mp3_path = ""
                 cover_path = ""
-
+                
                 # Lưu file mp3 & cover vào outputs/
                 if audio_url:
                     audio_bytes = download_bytes(audio_url)
@@ -502,54 +502,48 @@ with tab_make:
                     with open(mp3_path, "wb") as f:
                         f.write(audio_bytes)
 
+                img_bytes = None
                 if image_url:
                     img_bytes = download_bytes(image_url)
                     cover_path = f"outputs/covers/{ts}_{i}_{base}.jpg"
                     with open(cover_path, "wb") as f:
                         f.write(img_bytes)
-
-# --- NEW: Sao lưu bền lên Supabase ---
-if SUPABASE_READY:
-    try:
-        cover_bytes = None
-        try:
-            cover_bytes = img_bytes  # nếu em đã tải ảnh bìa ở trên
-        except NameError:
-            cover_bytes = None
-
-        _ = save_track_to_supabase(
-            title      = st.session_state.get("title", "Kids Song"),
-            style      = style,                      # biến style em đang dùng
-            lyrics_text= st.session_state.get("lyrics", ""),  # hoặc biến lyrics của em
-            audio_bytes= audio_bytes,               # ưu tiên bytes có sẵn
-            audio_url  = audio_url,                 # dự phòng (nếu audio_bytes None)
-            cover_bytes= cover_bytes,
-            uploader   = "streamlit-app"
-        )
-        st.caption("Đã sao lưu lên Supabase ✅")
-    except Exception as e:
-        st.warning(f"Lưu Supabase lỗi: {e}")
-# --- end NEW ---
+                        
+                # --- NEW: Sao lưu bền lên Supabase (đặt TRONG for + TRONG try) ---
+                if SUPABASE_READY:
+                    try:
+                        _ = save_track_to_supabase(
+                                title      = st.session_state.get("title", "Kids Song"),
+                                style      = style,
+                                lyrics_text= st.session_state.get("lyrics", ""),
+                                audio_bytes= audio_bytes,         # ưu tiên bytes đã có
+                                audio_url  = audio_url,           # dự phòng
+                                cover_bytes= img_bytes,           # có thì lưu
+                                uploader   = "streamlit-app"
+                        )
+                        st.caption("Đã sao lưu lên Supabase ✅")
+                    except Exception as e:
+                        st.warning(f"Lưu Supabase lỗi: {e}")
 
                 # Hiển thị card kết quả: ảnh bìa + player + nút tải
                 k1, k2 = st.columns([1, 2])
                 with k1:
                     if cover_path and os.path.exists(cover_path):
-                        st.image(cover_path, caption="Ảnh bìa", use_column_width=True)
+                        st.image(cover_path, caption="Ảnh bìa", use_container_width=True)  # ✅ đổi tham số
                     elif image_url:
-                        st.image(image_url, caption="Ảnh bìa", use_column_width=True)
+                        st.image(image_url, caption="Ảnh bìa", use_container_width=True)   # ✅ đổi tham số
                 with k2:
                     st.write(f"**{st.session_state.title or 'Kids Song'} — Bản {i}**")
                     if mp3_path and os.path.exists(mp3_path):
                         with open(mp3_path, "rb") as f:
-                            st.audio(f.read(), format="audio/mp3")
+                            st.audio(f.read(), format="audio/mp3", key=f"audio-{ts}-{i}")  # ✅ thêm key
                         with open(mp3_path, "rb") as f:
                             st.download_button("⬇️ Tải MP3", data=f, file_name=os.path.basename(mp3_path),
-                                               mime="audio/mpeg", use_container_width=True)
-                    elif audio_url:
-                        st.audio(audio_url, format="audio/mp3")
+                                                mime="audio/mpeg", use_container_width=True, key=f"dl-{ts}-{i}"  # ✅ thêm key)
+                elif audio_url:
+                    st.audio(audio_url, format="audio/mp3", key=f"audio-url-{ts}-{i}")  # ✅ thêm key
 
-                # Lưu lịch sử
+                # Lưu lịch sử (CSV local vẫn giữ)
                 write_history_row({
                     "time": ts,
                     "title": st.session_state.title or "Kids Song",
@@ -562,12 +556,6 @@ if SUPABASE_READY:
                     "mp3_path": mp3_path,
                     "cover_path": cover_path,
                 })
-            st.balloons()
-            st.info("Đã lưu vào thư viện. Xem ở tab 📚 Thư viện.")
-        except Exception as e:
-            st.error(str(e))
-
-    st.markdown('</div>', unsafe_allow_html=True)
 
 # ============ TAB 2: THƯ VIỆN (GALLERY) ============
 # --- NEW: Thư viện (Supabase) trong expander ---
@@ -741,6 +729,7 @@ st.markdown("""
   </div>
 </div>
 """, unsafe_allow_html=True)
+
 
 
 
