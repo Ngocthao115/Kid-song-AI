@@ -25,8 +25,8 @@ DEFAULT_SUNOSTYLE = get_secret("DEFAULT_SUNOSTYLE", "Kids, cheerful, playful, ed
 
 # --- Supabase (mới): dùng để KHÔNG MẤT thư viện & lịch sử ---
 SUPABASE_URL      = get_secret("SUPABASE_URL")
-SUPABASE_KEY      = get_secret("SUPABASE_KEY")  # dùng anon key là đủ cho đọc/ghi nếu bucket public và có policy phù hợp
-SUPABASE_BUCKET   = get_secret("SUPABASE_BUCKET", "kids-songs")
+SUPABASE_KEY      = get_secret("SUPABASE_KEY") 
+SUPABASE_BUCKET   = get_secret("SUPABASE_BUCKET", "Kids_songs")
 SUPABASE_TABLE    = get_secret("SUPABASE_TABLE", "tracks")
 
 # Client OpenAI (SDK >= 1.40)
@@ -770,6 +770,7 @@ st.markdown("""
   </div>
 </div>
 """, unsafe_allow_html=True)
+
 
 
 
