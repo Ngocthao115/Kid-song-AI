@@ -1,381 +1,735 @@
+import os, time, json, requests, datetime as dt, csv, re
+from typing import List, Optional
+
 import streamlit as st
-from pathlib import Path
-from datetime import datetime
-import uuid, io, mimetypes, time, os
-
-import requests
-
-# OpenAI (lyrics)
+from dotenv import load_dotenv
 from openai import OpenAI
 
-# Supabase
-from supabase import create_client
+# ============ 1) CONFIG & ENV (CLOUD + LOCAL) ===========
+from dotenv import load_dotenv
+load_dotenv()  # Local: đọc .env; Cloud: sẽ ưu tiên st.secrets
 
-# ───────────────────────── Config ─────────────────────────
+def get_secret(name, default=None):
+    # Ưu tiên secrets trên Streamlit Cloud; nếu không có thì lấy từ biến môi trường (.env)
+    try:
+        import streamlit as st
+        return st.secrets.get(name, os.getenv(name, default))
+    except Exception:
+        return os.getenv(name, default)
 
-st.set_page_config(page_title="Kid-song-AI", page_icon="🎵", layout="wide")
+OPENAI_API_KEY    = get_secret("OPENAI_API_KEY")
+SUNO_API_KEY      = get_secret("SUNO_API_KEY")
+SUNO_API_BASE     = get_secret("SUNO_API_BASE", "https://api.sunoapi.org")
+SUNO_MODEL        = get_secret("SUNO_MODEL", "V4_5")
+SUNO_CALLBACK_URL = get_secret("SUNO_CALLBACK_URL")
+DEFAULT_SUNOSTYLE = get_secret("DEFAULT_SUNOSTYLE", "Kids, cheerful, playful, educational")
 
-OPENAI_OK = "OPENAI_API_KEY" in st.secrets
-SUPABASE_OK = "SUPABASE_URL" in st.secrets and "SUPABASE_ANON_KEY" in st.secrets
-SUNO_OK = "SUNO_API_BASE" in st.secrets and "SUNO_API_KEY" in st.secrets
+# ===== Supabase persistence (ADD) =====
+from typing import Dict
+import mimetypes, uuid
+try:
+    from supabase import create_client
+except Exception as _e:
+    create_client = None  # phòng khi chưa cài gói
 
-BUCKET = st.secrets.get("BUCKET_NAME", "kids-songs")
-UPLOADER_DEFAULT = st.secrets.get("APP_UPLOADER_NAME", "")
-
-# ──────────────────────── Helpers ─────────────────────────
+SUPABASE_URL      = get_secret("SUPABASE_URL")
+SUPABASE_ANON_KEY = get_secret("SUPABASE_ANON_KEY")
+BUCKET_NAME       = get_secret("BUCKET_NAME", "kids-songs")
+SUPABASE_READY    = bool(SUPABASE_URL and SUPABASE_ANON_KEY and create_client is not None)
 
 @st.cache_resource
-def sb_client():
-    if not SUPABASE_OK:
-        raise RuntimeError("Chưa cấu hình Supabase trong Secrets.")
-    return create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_ANON_KEY"])
+def _sb():
+    if not SUPABASE_READY:
+        raise RuntimeError("Supabase chưa sẵn sàng (thiếu secrets hoặc gói supabase).")
+    return create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
 
-def sb_public_url(path: str) -> str:
-    return sb_client().storage.from_(BUCKET).get_public_url(path)
+def _sb_public_url(path: str) -> str:
+    return _sb().storage.from_(BUCKET_NAME).get_public_url(path)
 
-def sb_upload_bytes(data: bytes, path: str, content_type: str | None = None) -> str:
+def _sb_upload_bytes(data: bytes, path: str, content_type: str | None = None) -> str:
     if content_type is None:
         content_type = mimetypes.guess_type(path)[0] or "application/octet-stream"
-    sb_client().storage.from_(BUCKET).upload(
-        path, data, file_options={"contentType": content_type, "upsert": True}
-    )
-    return sb_public_url(path)
+    _sb().storage.from_(BUCKET_NAME).upload(path, data, file_options={"contentType": content_type, "upsert": True})
+    return _sb_public_url(path)
 
-def sb_insert_track(title, style, lyrics_url, audio_url, cover_url, uploader=""):
-    r = sb_client().table("tracks").insert({
-        "title": title, "style": style, "lyrics_url": lyrics_url,
-        "audio_url": audio_url, "cover_url": cover_url, "uploader": uploader
+def _sb_insert_track(title: str, style: str, lyrics_url: str, audio_url: str, cover_url: str, uploader: str = "") -> None:
+    _sb().table("tracks").insert({
+        "title": title, "style": style,
+        "lyrics_url": lyrics_url, "audio_url": audio_url, "cover_url": cover_url,
+        "uploader": uploader
     }).execute()
-    return r
 
-def sb_list_tracks(search_title="", style="", limit=200):
-    q = sb_client().table("tracks").select("*").order("created_at", desc=True).limit(limit)
+def save_track_to_supabase(
+    title: str,
+    style: str,
+    lyrics_text: str | None,
+    audio_bytes: bytes | None = None,
+    audio_url: str | None = None,
+    cover_bytes: bytes | None = None,
+    uploader: str = ""
+) -> Dict[str, str]:
+    """
+    Sao lưu lyrics/audio/cover lên Supabase Storage và ghi metadata vào bảng tracks.
+    Trả về dict các URL đã lưu. Không thay đổi logic sinh nhạc hiện tại.
+    """
+    if not SUPABASE_READY:
+        return {}
+
+    uid = str(uuid.uuid4())
+
+    # Lyrics
+    lyr_url = ""
+    if lyrics_text and lyrics_text.strip():
+        lyr_url = _sb_upload_bytes(lyrics_text.encode("utf-8"), f"{uid}/lyrics.txt", "text/plain; charset=utf-8")
+
+    # Audio: ưu tiên bytes; nếu chỉ có URL thì tải về một bản để lưu bền
+    if audio_bytes is None and audio_url:
+        try:
+            audio_bytes = download_bytes(audio_url)
+        except Exception:
+            pass
+    if not audio_bytes:
+        raise RuntimeError("Không có audio để lưu lên Supabase.")
+    aud_url = _sb_upload_bytes(audio_bytes, f"{uid}/audio.mp3", "audio/mpeg")
+
+    # Cover (tuỳ chọn)
+    cov_url = ""
+    if cover_bytes:
+        cov_url = _sb_upload_bytes(cover_bytes, f"{uid}/cover.jpg")
+
+    # Ghi DB
+    _sb_insert_track(title=title, style=style, lyrics_url=lyr_url, audio_url=aud_url, cover_url=cov_url, uploader=uploader)
+    return {"lyrics_url": lyr_url, "audio_url": aud_url, "cover_url": cov_url}
+
+def list_tracks_from_supabase(search_title: str = "", style: str = "", limit: int = 200) -> list[dict]:
+    if not SUPABASE_READY:
+        return []
+    q = _sb().table("tracks").select("*").order("created_at", desc=True).limit(limit)
     if search_title:
         q = q.ilike("title", f"%{search_title}%")
     if style and style.lower() != "tất cả":
         q = q.ilike("style", f"%{style}%")
     return q.execute().data
+# ===== end Supabase helpers =====
 
-def fetch_url_bytes(url: str, timeout=60) -> bytes | None:
-    try:
-        r = requests.get(url, timeout=timeout)
-        if r.ok:
-            return r.content
-    except Exception:
-        return None
-    return None
+import streamlit as st
+if not OPENAI_API_KEY:
+    st.error("Thiếu OPENAI_API_KEY — hãy vào ‘⋯ → Settings → Secrets’ để thêm.")
+    st.stop()
+if not SUNO_API_KEY:
+    st.error("Thiếu SUNO_API_KEY — thêm trong Secrets.")
+    st.stop()
+if not SUNO_CALLBACK_URL:
+    st.warning("Chưa có SUNO_CALLBACK_URL — tạm dùng webhook.site để demo.")
+    # Không stop vì app đang poll; có thể vẫn chạy
 
-def now_str():
-    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+# Cho SDK/requests đọc từ ENV nếu cần
+os.environ["OPENAI_API_KEY"] = OPENAI_API_KEY
 
-# ───────────────────── OpenAI Lyrics ──────────────────────
+# Client OpenAI (SDK >= 1.40)
+from openai import OpenAI
+client = OpenAI(api_key=OPENAI_API_KEY)
+HEADERS = {"Authorization": f"Bearer {SUNO_API_KEY}", "Content-Type": "application/json"}
 
-def openai_generate_lyrics(topic: str, style_hint: str) -> str:
-    if not OPENAI_OK:
-        raise RuntimeError("Chưa cấu hình OPENAI_API_KEY.")
-    client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
-    sys = ("Bạn là nhà thơ văn và là nhạc sĩ chuyên nghiệp sáng tác lời bài hát Thiếu nhi hoặc dùng câu chuyện, bài thơ thiếu nhi để sáng tác ra lời bài hát bằng tiếng Việt: vui tươi, an toàn, dễ hát. "
-           "Câu ngắn 5–9 âm tiết, điệp khúc rõ ràng, vần điệu dễ nhớ.")
-    prompt = f"Viết lời bài hát thiếu nhi theo chủ đề: {topic}\nPhong cách: {style_hint}\nBố cục: Verse/Chorus/Bridge (nếu cần)."
+# Thư mục xuất
+os.makedirs("outputs", exist_ok=True)
+os.makedirs("outputs/covers", exist_ok=True)
+os.makedirs("outputs/mp3", exist_ok=True)
+HISTORY_CSV = os.path.join("outputs", "tracks.csv")
+
+# ----------- Schema CSV (mới) -----------
+EXPECTED_HEADER = [
+    "time","title","topic","track_index","audio_url","image_url",
+    "style","model","mp3_path","cover_path"
+]
+
+# ============ 2) PROMPT HỆ THỐNG ============
+DEFAULT_LYRICS_SYSTEM = (
+    "Bạn là một nhà thơ và nhạc sĩ viết nhạc thiếu nhi chuyên nghiệp cho giáo dục mầm non. "
+    "Hãy sáng tác lời bài hát hoặc dùng câu chuyện, bài thơ thiếu nhi để sáng tác lời bài hát, phù hợp lứa tuổi 3 – 6, tươi vui, tích cực, tình cảm, yêu thương. "
+    "Mỗi câu 5–10 từ, vần điệu rõ, từ vựng đơn giản. Có điệp khúc dễ nhớ."
+)
+
+# ============ 3) HÀM NGHIỆP VỤ ============
+def build_user_prompt(
+    topic: str,
+    language: str = "vi",
+    target_words: Optional[List[str]] = None,
+    verses: int = 2,
+    include_bridge: bool = True,
+    min_lines: int = 12,
+    max_lines: int = 18,
+) -> str:
+    tw = ", ".join(target_words) if target_words else "Không bắt buộc"
+    structure = ["- Cấu trúc: [Verse 1] → [Chorus]"]
+    for i in range(2, verses + 1):
+        structure.append(f"→ [Verse {i}] → [Chorus]")
+    if include_bridge:
+        structure.append("→ [Bridge] (ngắn 2–4 dòng) → [Chorus] (kết)")
+    return (
+        f"Chủ đề: {topic}\n"
+        f"Ngôn ngữ: {language}\n"
+        "Yêu cầu:\n"
+        "- Ngôn ngữ đơn giản, an toàn cho trẻ 3–6 tuổi; tích cực, hồn nhiên.\n"
+        "- Vần điệu rõ, nhịp vui tươi hoặc tình cảm nhẹ nhàng, câu ngắn.\n"
+        "- Nội dung giáo dục nhẹ nhàng; khuyến khích hành vi tốt, hoặc tỏ lòng yêu thương và biết ơn.\n"
+        f"{' '.join(structure)}.\n"
+        f"- Từ ngữ chính (nếu lồng được): {tw}\n"
+        f"- Độ dài ~{min_lines}–{max_lines} dòng.\n"
+        "- Định dạng đầu ra có nhãn [Verse]/[Chorus]/[Bridge].\n"
+    )
+
+def generate_lyrics(topic: str, target_words: Optional[List[str]] = None, language: str = "vi",
+                    verses: int = 2, bridge: bool = True) -> str:
+    user_prompt = build_user_prompt(topic, language=language, target_words=target_words,
+                                    verses=verses, include_bridge=bridge)
     resp = client.chat.completions.create(
         model="gpt-4o-mini",
-        messages=[{"role":"system","content":sys},{"role":"user","content":prompt}],
-        temperature=0.8,
+        messages=[
+            {"role": "system", "content": DEFAULT_LYRICS_SYSTEM},
+            {"role": "user", "content": user_prompt.strip()},
+        ],
+        temperature=0.9,
+        max_tokens=700,
     )
     return resp.choices[0].message.content.strip()
 
-# ────────────────────── Suno API ─────────────────────────
+def refine_lyrics(original_text: str, instruction: str = "") -> str:
+    if not original_text.strip():
+        return original_text
+    user_msg = (
+        "Hãy chỉnh sửa/đánh bóng lời bài hát thiếu nhi bên dưới, giữ nguyên chủ đề và tinh thần cho trẻ 3–6 tuổi. "
+        "Tăng vần điệu, nhịp mượt, chia đoạn rõ [Verse]/[Chorus]/[Bridge]. "
+        "Áp dụng nhẹ nhàng chỉ dẫn nếu có, không kéo quá dài.\n\n"
+        f"Chỉ dẫn: {instruction or 'Không có'}\n\n"
+        "Văn bản cần chỉnh:\n" + original_text
+    )
+    resp = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[
+            {"role": "system", "content": DEFAULT_LYRICS_SYSTEM},
+            {"role": "user", "content": user_msg},
+        ],
+        temperature=0.6,
+        max_tokens=800,
+    )
+    return resp.choices[0].message.content.strip()
 
-def suno_headers():
-    return {
-        "Authorization": f"Bearer {st.secrets['SUNO_API_KEY']}",
-        "Content-Type": "application/json",
-    }
-
-def suno_create_track(title: str, prompt: str, style: str) -> str:
-    """
-    Gửi yêu cầu tạo bài hát. Return: track_id (string).
-    LƯU Ý: Endpoint có thể khác. Sửa theo tài liệu/adapter của chị nếu cần.
-    """
-    base = st.secrets["SUNO_API_BASE"].rstrip("/")
+def suno_generate_song(prompt: str, title: str, style: str, instrumental: bool = False) -> str:
+    endpoint = f"{SUNO_API_BASE}/api/v1/generate"
     payload = {
-        "title": title,
-        "prompt": prompt,          # lyrics text
-        "style": style,            # optional style tag
-        "make_instrumental": False # hoặc True nếu cần không lời
+        "prompt": prompt[:1800],
+        "title": title[:64],
+        "style": style[:200],
+        "model": SUNO_MODEL,
+        "instrumental": instrumental,
+        "customMode": True,
+        "callBackUrl": SUNO_CALLBACK_URL,
     }
-    # Ví dụ endpoint:
-    url = f"{base}/generate"
-    r = requests.post(url, json=payload, headers=suno_headers(), timeout=60)
+    r = requests.post(endpoint, headers=HEADERS, json=payload, timeout=60)
     r.raise_for_status()
     data = r.json()
-    # tuỳ API trả về: lấy id đầu tiên
-    track_id = data.get("id") or data.get("clip_id") or (data["data"][0]["id"] if "data" in data else None)
-    if not track_id:
-        raise RuntimeError(f"Không lấy được track id từ Suno: {data}")
-    return str(track_id)
+    if data.get("code") != 200 or not data.get("data", {}).get("taskId"):
+        raise RuntimeError("Suno generate failed: " + json.dumps(data, ensure_ascii=False))
+    return data["data"]["taskId"]
 
-def suno_get_track(track_id: str) -> dict:
-    """
-    Lấy trạng thái bài hát. Return dict có các keys: status, audio_url, image_url.
-    """
-    base = st.secrets["SUNO_API_BASE"].rstrip("/")
-    # Ví dụ endpoint:
-    url = f"{base}/tracks/{track_id}"
-    r = requests.get(url, headers=suno_headers(), timeout=60)
-    r.raise_for_status()
-    data = r.json()
-    # Chuẩn hoá field
-    status = data.get("status") or data.get("state") or "unknown"
-    audio_url = data.get("audio_url") or data.get("audio") or data.get("mp3_url")
-    image_url = data.get("image_url") or data.get("cover_url")
-    return {"status": status, "audio_url": audio_url, "image_url": image_url, "raw": data}
-
-def suno_generate_and_wait(title: str, lyrics: str, style: str, poll_secs=6, max_wait=420) -> tuple[str, str]:
-    """
-    Tạo bài hát và chờ hoàn tất.
-    Return: (audio_url, cover_url). Có thể là URL tạm của Suno; sẽ sao lưu sang Supabase.
-    """
-    track_id = suno_create_track(title=title, prompt=lyrics, style=style)
+def suno_poll(task_id: str, timeout_sec: int = 360, interval_sec: int = 8):
+    endpoint = f"{SUNO_API_BASE}/api/v1/generate/record-info"
     t0 = time.time()
-    last_status = "queued"
-    with st.status("Đang tạo nhạc…", expanded=True) as s:
-        s.write(f"Track ID: `{track_id}`")
-        while time.time() - t0 < max_wait:
-            info = suno_get_track(track_id)
-            status = (info.get("status") or "").lower()
-            if status != last_status:
-                s.write(f"Trạng thái: **{status}**")
-                last_status = status
-            if status in ("completed", "complete", "succeeded", "success"):
-                s.update(label="✅ Đã tạo xong nhạc", state="complete")
-                return info.get("audio_url"), info.get("image_url")
-            if status in ("failed", "error", "canceled"):
-                s.update(label="❌ Suno báo lỗi", state="error")
-                raise RuntimeError(f"Suno lỗi: {info.get('raw')}")
-            time.sleep(poll_secs)
-        s.update(label="⌛ Hết thời gian chờ", state="error")
-        raise TimeoutError("Chờ quá lâu, vui lòng thử lại.")
-        
-# ───────────────────────── UI ────────────────────────────
+    while time.time() - t0 < timeout_sec:
+        r = requests.get(
+            endpoint,
+            headers={"Authorization": f"Bearer {SUNO_API_KEY}"},
+            params={"taskId": task_id},
+            timeout=60,
+        )
+        r.raise_for_status()
+        data = r.json()
+        try:
+            items = data["data"]["response"]["sunoData"]
+            ready = [it for it in items if it.get("audioUrl") or it.get("audioUrlHigh")]
+            if ready:
+                return ready
+        except Exception:
+            pass
+        time.sleep(interval_sec)
+    raise TimeoutError("Hết thời gian chờ trả kết quả")
 
+def download_bytes(url: str) -> bytes:
+    r = requests.get(url, timeout=120)
+    r.raise_for_status()
+    return r.content
+
+def sanitize_filename(name: str) -> str:
+    name = re.sub(r"\s+", "_", name.strip())
+    return re.sub(r"[^\w\-\.]", "", name)
+
+# ---------- CSV helpers: migrate & load ----------
+def ensure_history_schema():
+    """Đảm bảo tracks.csv có header EXPECTED_HEADER. Nếu file cũ (9 cột), tự migrate sang 10 cột."""
+    if not os.path.exists(HISTORY_CSV):
+        # tạo file mới với header chuẩn
+        with open(HISTORY_CSV, "w", newline="", encoding="utf-8") as f:
+            w = csv.writer(f)
+            w.writerow(EXPECTED_HEADER)
+        return
+
+    # Đọc header hiện tại an toàn
+    with open(HISTORY_CSV, "r", newline="", encoding="utf-8") as f:
+        reader = csv.reader(f)
+        header = next(reader, None)
+
+    if header == EXPECTED_HEADER:
+        return  # đúng rồi
+
+    # Migrate: đọc tất cả cũ -> ghi file mới cùng tên với header mới
+    rows_old = []
+    with open(HISTORY_CSV, "r", newline="", encoding="utf-8") as f:
+        r = csv.DictReader(f)
+        for row in r:
+            rows_old.append(row)
+
+    tmp_path = HISTORY_CSV + ".tmp"
+    with open(tmp_path, "w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=EXPECTED_HEADER, quoting=csv.QUOTE_MINIMAL)
+        w.writeheader()
+        for old in rows_old:
+            newrow = {k: old.get(k, "") for k in EXPECTED_HEADER}
+            # Một số file cũ có 'track_index' là float => ép về int nếu cần
+            if newrow.get("track_index"):
+                try:
+                    newrow["track_index"] = int(float(newrow["track_index"]))
+                except Exception:
+                    pass
+            w.writerow(newrow)
+
+    os.replace(tmp_path, HISTORY_CSV)  # atomically replace
+
+def write_history_row(row: dict) -> None:
+    ensure_history_schema()
+    with open(HISTORY_CSV, "a", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=EXPECTED_HEADER, quoting=csv.QUOTE_MINIMAL)
+        w.writerow({k: row.get(k, "") for k in EXPECTED_HEADER})
+
+def load_history_df():
+    """Đọc CSV về DataFrame, có fallback để không vỡ UI nếu dữ liệu lẫn cột."""
+    import pandas as pd
+    ensure_history_schema()
+    try:
+        return pd.read_csv(HISTORY_CSV, dtype=str, keep_default_na=False)
+    except Exception:
+        try:
+            # fallback engine python, bỏ dòng xấu
+            return pd.read_csv(HISTORY_CSV, dtype=str, keep_default_na=False, engine="python", on_bad_lines="skip")
+        except Exception:
+            # đọc thủ công -> DataFrame
+            with open(HISTORY_CSV, "r", newline="", encoding="utf-8") as f:
+                r = csv.DictReader(f)
+                rows = [row for row in r]
+            if not rows:
+                import pandas as pd
+                return pd.DataFrame(columns=EXPECTED_HEADER)
+            import pandas as pd
+            # Bảo đảm đủ cột
+            for r_ in rows:
+                for k in EXPECTED_HEADER:
+                    r_.setdefault(k, "")
+            return pd.DataFrame(rows, columns=EXPECTED_HEADER)
+
+# ============ 4) UI / THEME ============
+st.set_page_config(page_title="Kids Song AI", page_icon="🎵", layout="centered")
 st.markdown(
-    "<h1 style='margin-bottom:.25rem'>OpenAI Lyrics • Suno Music</h1>"
-    "<p style='color:#64748b;margin-top:0'>Kho tàng âm nhạc Thiếu nhi từ AI</p>",
-    unsafe_allow_html=True
+    """
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Fredoka:wght@400;600&family=Inter:wght@400;600;700&display=swap');
+:root { --radius: 16px; }
+h1,h2,h3 { font-family: 'Fredoka', system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+body, p, div, span { font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+.main .block-container { padding-top: 2rem; padding-bottom: 3rem; max-width: 980px; }
+.card { background:#fff; border-radius:var(--radius); padding:1rem 1.25rem;
+        box-shadow:0 10px 18px rgba(15,23,42,.06); border:1px solid rgba(15,23,42,.06); margin-bottom:1rem; }
+.badge { display:inline-flex; align-items:center; gap:.4rem; padding:.35rem .7rem; border-radius:999px; background:#ECFEFF; color:#0E7490;
+         font-size:.78rem; font-weight:700; letter-spacing:.2px; }
+.stButton>button { border-radius:12px; padding:.6rem 1rem; font-weight:700; }
+.stButton>button[kind="secondary"] { background:#F8FAFC; border:1px solid #E2E8F0; }
+.toolbar { display:flex; gap:.5rem; flex-wrap:wrap; }
+.grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px; }
+.card-sm { border:1px solid #E2E8F0; border-radius:14px; padding:10px; box-shadow:0 4px 10px rgba(15,23,42,.05); }
+.card-sm h4 { margin:.2rem 0 .4rem; font-size:1rem; }
+audio { width:100% !important; }
+footer { color:#94a3b8; font-size:.85rem; }
+</style>
+""",
+    unsafe_allow_html=True,
 )
 
-tabs = st.tabs(["🎹 Tạo bài hát", "🖼️ Thư viện (Gallery)", "🕘 Lịch sử", "⚙️ Cài đặt / Admin"])
+# ============ 5) STATE ============
+if "lyrics" not in st.session_state: st.session_state.lyrics = ""
+if "title" not in st.session_state: st.session_state.title = ""
+if "topic" not in st.session_state: st.session_state.topic = ""
+if "targets" not in st.session_state: st.session_state.targets = []
+if "generated" not in st.session_state: st.session_state.generated = False
 
-# ───── Tab 1: Create ─────
-with tabs[0]:
-    st.subheader("Tạo bài hát")
-    c1, c2 = st.columns([2,1])
+# — Sidebar
+with st.sidebar:
+    st.markdown("## 👩‍🏫 Hướng dẫn nhanh")
+    st.markdown(
+        "- **Bước 1:** Nhập Miêu tả/Từ khóa/Title → **Tạo lời**.\n"
+        "- **Bước 2:** Chỉnh tay hoặc **Refine**.\n"
+        "- **Bước 3:** **Tạo nhạc**, xem ảnh bìa & tải file.\n"
+        "- Xem lại ở **📚 Thư viện** hoặc **🗂️ Lịch sử**."
+    )
+    st.divider()
+    st.caption(f"Model Suno: **{SUNO_MODEL}**")
+    st.caption(f"Style mặc định: **{DEFAULT_SUNOSTYLE}**")
 
+# — Header
+st.title("🎵 Kids Song AI")
+st.markdown('<span class="badge">OpenAI Lyrics • Suno Music</span>', unsafe_allow_html=True)
+
+# — Tabs
+tab_make, tab_library, tab_history, tab_settings = st.tabs(["✨ Tạo bài hát", "📚 Thư viện", "🗂️ Lịch sử", "⚙️ Cài đặt"])
+
+# ============ TAB 1: Tạo bài hát ============
+with tab_make:
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    col1, col2 = st.columns([2, 1])
+    with col1:
+        topic = st.text_input("Miêu tả bài hát", st.session_state.topic or "Trường mầm non của bé")
+        target_str = st.text_input("Từ ngữ gợi ý (phân tách bởi dấu phẩy)", "Đồ chơi, sân trường, lớp học, thân thương")
+        title = st.text_input("Tiêu đề bài hát", st.session_state.title or "Trường mầm non của bé")
+    with col2:
+        verses = st.number_input("Số verse", 1, 4, 2)
+        bridge = st.toggle("Thêm Bridge", value=True)
+        language = st.selectbox("Ngôn ngữ", ["Vi", "En"], index=0)
+        style = st.selectbox(
+            "Phong cách nhạc",
+            [
+                DEFAULT_SUNOSTYLE,
+                "Kids, gentle, soothing, lullaby, warm",
+                "Kids, cheerful, playful, educational",
+                "Kids, cute pop, claps, ukulele",
+                "Kids, upbeat, bright, classroom sing-along",
+                "Kids lullaby, gentle, calm, emotional, soft piano and strings, warm female vocal",
+                "Instrumental lullaby, gentle, soothing, soft piano + strings, warm and calm",
+                "Kids, bright clear child voice (boy), boy soprano, youthful, innocent tone, light airy timbre",
+                "Young boy vocal, cute and playful, bright and clear, soft dynamics, classroom sing-along",
+                "Childlike male vocal, tender and gentle, warm, no heavy drums, clean mix",
+                "Boy soprano, soft pop for kids, cheerful and sweet, ukulele + glockenspiel",
+                "Lullaby for kids, young boy singer, gentle, soothing, soft piano and strings",
+                "Gentle emotional kids ballad, young boy vocal, warm and tender, minimal percussion",
+            ],
+            index=0,
+            help="Chọn style nhạc"
+        )
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    # --- Thanh thao tác
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    st.subheader("📝 TIẾN TRÌNH SÁNG TÁC")
+    c1, c2, c3 = st.columns([1,1,1])
     with c1:
-        title = st.text_input("Miêu tả", placeholder="Ví dụ: Chuyện cậu bé Tích Chu", key="t-title")
-        topic = st.text_input("Từ khóa chính", placeholder="Ví dụ: uống nước nhớ nguồn, yêu gia đình...", key="t-topic")
-        style = st.selectbox("Style", ["Cheerful","Gentle","Lullaby","Kids Pop","Instrumental","Other"], key="t-style")
-        if st.button("✨ Tạo lời bài hát", key="btn-lyr"):
-            try:
-                st.session_state["lyrics"] = openai_generate_lyrics(topic or title, style)
-                st.success("Đã sinh lời! Chỉnh sửa bên dưới trước khi tạo nhạc hoặc lưu.")
-            except Exception as e:
-                st.error(f"Lỗi OpenAI: {e}")
-        lyrics = st.text_area("Lời bài hát (có thể chỉnh sửa)", value=st.session_state.get("lyrics",""), height=260, key="lyrics")
-
+        btn_generate = st.button("✨ Tạo lời bài hát", use_container_width=True)
     with c2:
-        st.markdown("**Ảnh bìa (tuỳ chọn)**")
-        up_cover = st.file_uploader("Chọn ảnh PNG/JPG", type=["png","jpg","jpeg"], key="u-cover")
-        st.markdown("---")
-        st.markdown("**Âm thanh** — 3 cách:")
-        up_audio = st.file_uploader("1) Upload file MP3/WAV", type=["mp3","wav"], key="u-audio")
-        audio_url_input = st.text_input("2) Dán URL MP3 (nếu đã có từ Suno/Udio…)", key="u-audio-url")
-        suno_will_run = st.checkbox("3) Tạo bằng Suno ngay trong app", value=True, key="u-suno")
+        refine_hint = st.text_input("Chỉ dẫn refine (tuỳ chọn)", placeholder="Ví dụ: Nhập yêu cầu")
+    with c3:
+        btn_refine = st.button("🪄 Refine", use_container_width=True,
+                               disabled=not bool(st.session_state.lyrics.strip()))
 
-        uploader = st.text_input("Người tạo/uploader (tuỳ chọn)", value=UPLOADER_DEFAULT, key="uploader")
-
-        if st.button("💾 Lưu vào Thư viện (Supabase)", use_container_width=True, key="btn-save"):
-            try:
-                if not SUPABASE_OK:
-                    st.warning("Chưa cấu hình Supabase Secrets.")
-                    st.stop()
-                if not title:
-                    st.warning("Hãy nhập tiêu đề.")
-                    st.stop()
-
-                # 1) Nếu chọn chạy Suno, tạo nhạc trước
-                final_audio_bytes = None
-                final_cover_bytes = None
-                if suno_will_run:
-                    if not SUNO_OK:
-                        st.warning("Chưa cấu hình Suno API trong Secrets.")
-                        st.stop()
-                    if not lyrics.strip():
-                        st.warning("Cần có lời bài hát để gửi Suno.")
-                        st.stop()
-                    au_url, img_url = suno_generate_and_wait(title=title, lyrics=lyrics, style=style)
-                    # cố gắng tải bytes để lưu bản copy vào Supabase
-                    if au_url:
-                        final_audio_bytes = fetch_url_bytes(au_url)
-                    if img_url:
-                        final_cover_bytes = fetch_url_bytes(img_url)
-
-                # 2) Ưu tiên audio từ upload nếu có; nếu không có, dùng audio đã tải từ URL hoặc do Suno trả
-                if up_audio is not None:
-                    final_audio_bytes = up_audio.read()
-                    audio_ext = Path(up_audio.name).suffix.lower() or ".mp3"
-                elif audio_url_input.strip() and final_audio_bytes is None:
-                    # có URL do người dùng dán
-                    final_audio_bytes = fetch_url_bytes(audio_url_input.strip())
-                    audio_ext = ".mp3"
-                else:
-                    audio_ext = ".mp3"  # mặc định cho Suno
-
-                if final_audio_bytes is None:
-                    st.warning("Chưa có âm thanh (upload/URL/Suno).")
-                    st.stop()
-
-                # 3) Chuẩn bị dữ liệu để upload Supabase
-                uid = str(uuid.uuid4())
-                # lyrics
-                lyrics_url = ""
-                if lyrics.strip():
-                    lyrics_url = sb_upload_bytes(lyrics.encode("utf-8"), f"{uid}/lyrics.txt", "text/plain; charset=utf-8")
-                # cover: ưu tiên upload ảnh người dùng; nếu không, lấy từ Suno; nếu không có thì bỏ qua
-                cover_bytes_to_save = None
-                cover_ext = ".png"
-                if up_cover is not None:
-                    cover_ext = Path(up_cover.name).suffix.lower() or ".png"
-                    cover_bytes_to_save = up_cover.read()
-                elif final_cover_bytes:
-                    cover_bytes_to_save = final_cover_bytes
-                cover_url = ""
-                if cover_bytes_to_save:
-                    cover_url = sb_upload_bytes(cover_bytes_to_save, f"{uid}/cover{cover_ext}")
-
-                # audio
-                audio_url = sb_upload_bytes(final_audio_bytes, f"{uid}/audio{audio_ext}", "audio/mpeg")
-
-                # 4) Ghi metadata vào DB
-                sb_insert_track(title=title.strip(), style=style, lyrics_url=lyrics_url,
-                                audio_url=audio_url, cover_url=cover_url, uploader=uploader.strip())
-                st.success("Đã lưu bền vững vào Thư viện ✅")
-                st.session_state["lyrics"] = ""
-            except Exception as e:
-                st.error(f"Lỗi lưu: {e}")
-
-# ───── Tab 2: Library ─────
-with tabs[1]:
-    st.subheader("Thư viện (Gallery)")
-    s1, s2 = st.columns([2,1])
-    with s1:
-        q = st.text_input("Tìm theo tiêu đề/chủ đề", key="lib-q")
-    with s2:
-        flt = st.selectbox("Lọc theo style", ["Tất cả","Cheerful","Gentle","Lullaby","Kids Pop","Instrumental","Other"], key="lib-style")
-
-    rows = []
-    try:
-        rows = sb_list_tracks(search_title=q, style=flt)
-    except Exception as e:
-        st.error(f"Không đọc được thư viện: {e}")
-
-    if not rows:
-        st.info("Chưa có bài hát nào trong Thư viện.")
-    else:
-        for i, r in enumerate(rows):
-            tid = str(r.get("id", f"row-{i}"))
-            st.markdown("---")
-            st.markdown(f"### {r.get('title','(Không tiêu đề)')}")
-            st.caption(f"{r.get('created_at','')[:19]} • {r.get('style','')} • {r.get('uploader','')}")
-            if r.get("cover_url"):
-                st.image(r["cover_url"], use_container_width=True)
-            if r.get("audio_url"):
-                st.audio(r["audio_url"], start_time=0, key=f"audio-{tid}")
-            c1, c2, c3 = st.columns(3)
-            with c1:
-                if r.get("audio_url"):
-                    st.markdown(f"[⬇ MP3]({r['audio_url']})")
-            with c2:
-                if r.get("lyrics_url"):
-                    st.markdown(f"[📄 Lời bài hát]({r['lyrics_url']})")
-            with c3:
-                if r.get("cover_url"):
-                    st.markdown(f"[🖼 Ảnh bìa]({r['cover_url']})")
-
-# ───── Tab 3: History ─────
-with tabs[2]:
-    st.subheader("Lịch sử gần đây")
-    try:
-        hist = sb_list_tracks(limit=100)
-    except Exception as e:
-        hist = []
-        st.error(f"Lỗi tải lịch sử: {e}")
-    for i, r in enumerate(hist):
-        tid = str(r.get("id", f"h-{i}"))
-        cols = st.columns([6,2,3,3])
-        cols[0].markdown(f"**{r.get('title','(Không tiêu đề)')}**")
-        cols[1].write(r.get("style",""))
-        cols[2].write((r.get("created_at","") or "")[:19])
-        cols[3].write(r.get("uploader",""))
-
-# ───── Tab 4: Admin ─────
-with tabs[3]:
-    st.subheader("Cài đặt / Admin")
-    st.write("OpenAI:", "✅" if OPENAI_OK else "—")
-    st.write("Supabase:", "✅" if SUPABASE_OK else "❌")
-    st.write("Bucket:", BUCKET)
-    st.write("Suno:", "✅" if SUNO_OK else "—")
-
-    st.markdown("---")
-    st.markdown("### ⬆️ Import nhiều file (đẩy lên Supabase)")
-    up_audios = st.file_uploader("Audio MP3/WAV (nhiều file)", type=["mp3","wav"], accept_multiple_files=True, key="adm-audios")
-    up_lyrics = st.file_uploader("TXT lời (nhiều file)", type=["txt"], accept_multiple_files=True, key="adm-lyrics")
-    up_covers = st.file_uploader("Ảnh bìa (nhiều file)", type=["png","jpg","jpeg"], accept_multiple_files=True, key="adm-covers")
-
-    def _to_map(files):
-        return {Path(f.name).stem: f for f in files} if files else {}
-
-    if st.button("Import lên Thư viện", key="btn-import"):
-        if not SUPABASE_OK:
-            st.warning("Chưa cấu hình Supabase.")
-        else:
-            aud_map, lyr_map, cov_map = _to_map(up_audios), _to_map(up_lyrics), _to_map(up_covers)
-            if not aud_map:
-                st.warning("Cần tối thiểu 1 audio.")
-            else:
-                n = 0
-                for stem, af in aud_map.items():
-                    uid = str(uuid.uuid4())
-                    aurl = sb_upload_bytes(af.read(), f"{uid}/audio{Path(af.name).suffix.lower() or '.mp3'}", "audio/mpeg")
-                    lurl = ""
-                    curl = ""
-                    if stem in lyr_map:
-                        lurl = sb_upload_bytes(lyr_map[stem].read(), f"{uid}/lyrics.txt", "text/plain; charset=utf-8")
-                    if stem in cov_map:
-                        curl = sb_upload_bytes(cov_map[stem].read(), f"{uid}/cover{Path(cov_map[stem].name).suffix.lower() or '.png'}")
-                    sb_insert_track(title=stem, style="", lyrics_url=lurl, audio_url=aurl, cover_url=curl, uploader="import")
-                    n += 1
-                st.success(f"Đã import {n} bài.")
-
-    st.markdown("---")
-    st.markdown("### ⬇️ Export danh sách (CSV URL)")
-    if st.button("Tạo CSV & tải xuống", key="btn-export"):
+    if btn_generate:
         try:
-            rows = sb_list_tracks(limit=10000)
-            import csv
-            mem = io.StringIO()
-            writer = csv.writer(mem)
-            writer.writerow(["id","title","style","lyrics_url","audio_url","cover_url","created_at","uploader"])
-            for r in rows:
-                writer.writerow([r.get("id"), r.get("title"), r.get("style"), r.get("lyrics_url"),
-                                 r.get("audio_url"), r.get("cover_url"), r.get("created_at"), r.get("uploader")])
-            st.download_button("Tải CSV", data=mem.getvalue().encode("utf-8"),
-                               file_name="kids_songs_urls.csv", mime="text/csv", key="dl-csv")
+            targets = [w.strip() for w in target_str.split(",") if w.strip()]
+            with st.spinner("Đang sáng tác lời..."):
+                lyrics = generate_lyrics(topic, targets, language=language, verses=verses, bridge=bridge)
+            st.session_state.lyrics = lyrics
+            st.session_state.title = title
+            st.session_state.topic = topic
+            st.session_state.targets = targets
+            st.session_state.generated = True
+            st.success("Đã sinh lời. Chỉnh sửa trực tiếp hoặc bấm Refine.")
         except Exception as e:
-            st.error(f"Lỗi export: {e}")
+            st.error(str(e))
 
-  # ===========  FOOTER ===========
+    if btn_refine and st.session_state.lyrics.strip():
+        try:
+            with st.spinner("Đang chỉnh sửa lời..."):
+                st.session_state.lyrics = refine_lyrics(st.session_state.lyrics, refine_hint)
+            st.success("Đã refine lời bài hát.")
+        except Exception as e:
+            st.error(str(e))
+
+    # Ô soạn thảo lời (luôn hiển thị)
+    st.session_state.lyrics = st.text_area(
+        "Soạn thảo/Chỉnh sửa tại đây trước khi tạo nhạc:",
+        value=st.session_state.lyrics, height=320
+    )
+
+    # Nút sinh nhạc Suno
+    st.divider()
+    left, right = st.columns([1, 2])
+    with left:
+        instrumental = st.toggle("Chỉ giai điệu (instrumental)", value=False)
+    with right:
+        btn_music = st.button("🎧 Tạo nhạc", use_container_width=True,
+                              disabled=not bool(st.session_state.lyrics.strip()))
+
+    # ========== KẾT QUẢ + ẢNH BÌA GẮN TRONG TRANG ==========
+    if btn_music and st.session_state.lyrics.strip():
+        try:
+            with st.spinner("Đang tạo bài hát..."):
+                task_id = suno_generate_song(
+                    st.session_state.lyrics,
+                    st.session_state.title or "Kids Song",
+                    style=style,
+                    instrumental=instrumental
+                )
+                tracks = suno_poll(task_id)
+
+            st.subheader("🎧 Kết quả")
+            ts = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
+            base = sanitize_filename(st.session_state.title or "Kids_Song")
+
+            for i, t in enumerate(tracks, 1):
+                audio_url = t.get("audioUrlHigh") or t.get("audioUrl")
+                image_url = t.get("imageUrl")
+                mp3_path = ""
+                cover_path = ""
+
+                # Lưu file mp3 & cover vào outputs/
+                if audio_url:
+                    audio_bytes = download_bytes(audio_url)
+                    mp3_path = f"outputs/mp3/{ts}_{i}_{base}.mp3"
+                    with open(mp3_path, "wb") as f:
+                        f.write(audio_bytes)
+
+                if image_url:
+                    img_bytes = download_bytes(image_url)
+                    cover_path = f"outputs/covers/{ts}_{i}_{base}.jpg"
+                    with open(cover_path, "wb") as f:
+                        f.write(img_bytes)
+
+# --- NEW: Sao lưu bền lên Supabase ---
+if SUPABASE_READY:
+    try:
+        cover_bytes = None
+        try:
+            cover_bytes = img_bytes  # nếu em đã tải ảnh bìa ở trên
+        except NameError:
+            cover_bytes = None
+
+        _ = save_track_to_supabase(
+            title      = st.session_state.get("title", "Kids Song"),
+            style      = style,                      # biến style em đang dùng
+            lyrics_text= st.session_state.get("lyrics", ""),  # hoặc biến lyrics của em
+            audio_bytes= audio_bytes,               # ưu tiên bytes có sẵn
+            audio_url  = audio_url,                 # dự phòng (nếu audio_bytes None)
+            cover_bytes= cover_bytes,
+            uploader   = "streamlit-app"
+        )
+        st.caption("Đã sao lưu lên Supabase ✅")
+    except Exception as e:
+        st.warning(f"Lưu Supabase lỗi: {e}")
+# --- end NEW ---
+
+                # Hiển thị card kết quả: ảnh bìa + player + nút tải
+                k1, k2 = st.columns([1, 2])
+                with k1:
+                    if cover_path and os.path.exists(cover_path):
+                        st.image(cover_path, caption="Ảnh bìa", use_column_width=True)
+                    elif image_url:
+                        st.image(image_url, caption="Ảnh bìa", use_column_width=True)
+                with k2:
+                    st.write(f"**{st.session_state.title or 'Kids Song'} — Bản {i}**")
+                    if mp3_path and os.path.exists(mp3_path):
+                        with open(mp3_path, "rb") as f:
+                            st.audio(f.read(), format="audio/mp3")
+                        with open(mp3_path, "rb") as f:
+                            st.download_button("⬇️ Tải MP3", data=f, file_name=os.path.basename(mp3_path),
+                                               mime="audio/mpeg", use_container_width=True)
+                    elif audio_url:
+                        st.audio(audio_url, format="audio/mp3")
+
+                # Lưu lịch sử
+                write_history_row({
+                    "time": ts,
+                    "title": st.session_state.title or "Kids Song",
+                    "topic": st.session_state.topic or "",
+                    "track_index": i,
+                    "audio_url": audio_url or "",
+                    "image_url": image_url or "",
+                    "style": style,
+                    "model": SUNO_MODEL,
+                    "mp3_path": mp3_path,
+                    "cover_path": cover_path,
+                })
+            st.balloons()
+            st.info("Đã lưu vào thư viện. Xem ở tab 📚 Thư viện.")
+        except Exception as e:
+            st.error(str(e))
+
+    st.markdown('</div>', unsafe_allow_html=True)
+
+# ============ TAB 2: THƯ VIỆN (GALLERY) ============
+# --- NEW: Thư viện (Supabase) trong expander ---
+if SUPABASE_READY:
+    with st.expander("📦 Thư viện trên Supabase (bền vững)", expanded=False):
+        c1, c2 = st.columns([2,1])
+        with c1:
+            sb_q = st.text_input("Tìm theo tiêu đề/chủ đề (Supabase)", key="sb-q")
+        with c2:
+            sb_style = st.selectbox("Lọc style (Supabase)", ["Tất cả", DEFAULT_SUNOSTYLE,
+                "Kids, gentle, soothing, lullaby, warm",
+                "Kids, cheerful, playful, educational",
+                "Kids, cute pop, claps, ukulele",
+                "Kids, upbeat, bright, classroom sing-along",
+                "Kids lullaby, gentle, calm, emotional, soft piano and strings, warm female vocal",
+                "Instrumental lullaby, gentle, soothing, soft piano + strings, warm and calm",
+                "Kids, bright clear child voice (boy), boy soprano, youthful, innocent tone, light airy timbre",
+                "Young boy vocal, cute and playful, bright and clear, soft dynamics, classroom sing-along",
+                "Childlike male vocal, tender and gentle, warm, no heavy drums, clean mix",
+                "Boy soprano, soft pop for kids, cheerful and sweet, ukulele + glockenspiel",
+                "Lullaby for kids, young boy singer, gentle, soothing, soft piano and strings",
+                "Gentle emotional kids ballad, young boy vocal, warm and tender, minimal percussion"],
+                key="sb-style"
+            )
+
+        try:
+            rows = list_tracks_from_supabase(search_title=sb_q, style=sb_style)
+            if not rows:
+                st.info("Chưa có bài trên Supabase.")
+            else:
+                cols = st.columns(4)
+                for idx, r in enumerate(rows):
+                    col = cols[idx % 4]
+                    with col:
+                        st.markdown('<div class="card-sm">', unsafe_allow_html=True)
+                        if r.get("cover_url"):
+                            st.image(r["cover_url"], use_container_width=True)
+                        st.markdown(f"**{r.get('title','(Không tiêu đề)')}**")
+                        st.caption(f"{(r.get('created_at','') or '')[:19]} • {r.get('style','')}")
+                        if r.get("audio_url"):
+                            st.audio(r["audio_url"], format="audio/mp3", key=f"sb-audio-{idx}")
+                            st.markdown(f"[⬇ MP3]({r['audio_url']})")
+                        if r.get("lyrics_url"):
+                            st.markdown(f"[📄 Lời bài hát]({r['lyrics_url']})")
+                        st.markdown('</div>', unsafe_allow_html=True)
+        except Exception as e:
+            st.error(f"Không đọc Supabase: {e}")
+# --- end NEW ---
+
+with tab_library:
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    st.markdown("### 📚 Thư viện (Gallery)")
+    if os.path.exists(HISTORY_CSV):
+        try:
+            import pandas as pd
+            df = load_history_df()
+            # Mới nhất trước
+            if "time" in df.columns and "track_index" in df.columns:
+                df = df.sort_values(by=["time","track_index"], ascending=[False, True]).reset_index(drop=True)
+
+            # Bộ lọc nhanh
+            colf1, colf2 = st.columns([2,1])
+            with colf1:
+                q = st.text_input("Tìm theo tiêu đề/chủ đề", "")
+            with colf2:
+                style_vals = sorted([s for s in df.get("style", []).dropna().unique().tolist()]) if "style" in df.columns else []
+                style_pick = st.selectbox("Lọc theo style", ["Tất cả"] + style_vals)
+            if q and "title" in df.columns and "topic" in df.columns:
+                mask = df["title"].str.contains(q, case=False, na=False) | df["topic"].str.contains(q, case=False, na=False)
+                df = df[mask]
+            if style_pick and style_pick != "Tất cả" and "style" in df.columns:
+                df = df[df["style"] == style_pick]
+
+            # Grid gallery
+            if len(df) == 0:
+                st.info("Chưa có bài nào khớp bộ lọc.")
+            else:
+                cols = st.columns(4)
+                for idx, row in df.iterrows():
+                    col = cols[idx % 4]
+                    with col:
+                        st.markdown('<div class="card-sm">', unsafe_allow_html=True)
+                        cover = (row.get("cover_path") or "").strip()
+                        image_url = (row.get("image_url") or "").strip()
+                        title = row.get("title") or "Kids Song"
+                        subtitle = f"{row.get('time','')} • Bản {int(float(row.get('track_index', 1)))}" if row.get('track_index') else f"{row.get('time','')}"
+
+                        # ảnh bìa
+                        if cover and os.path.exists(cover):
+                            st.image(cover, use_container_width=True)
+                        elif image_url:
+                            st.image(image_url, use_container_width=True)
+                        else:
+                            st.image("https://picsum.photos/seed/kidsmusic/600/400", use_container_width=True)
+
+                        st.markdown(f"<h4>{title}</h4><div style='color:#64748b'>{subtitle}</div>", unsafe_allow_html=True)
+
+                        # audio
+                        mp3_path = (row.get("mp3_path") or "").strip()
+                        audio_url = (row.get("audio_url") or "").strip()
+                        if mp3_path and os.path.exists(mp3_path):
+                            with open(mp3_path, "rb") as f:
+                                st.audio(f.read(), format="audio/mp3")
+                            with open(mp3_path, "rb") as f:
+                                st.download_button("⬇️ Tải MP3", data=f, file_name=os.path.basename(mp3_path),
+                                                   mime="audio/mpeg", use_container_width=True)
+                        elif audio_url:
+                            st.audio(audio_url, format="audio/mp3")
+
+                        st.markdown('</div>', unsafe_allow_html=True)
+
+        except Exception as e:
+            st.error("Không đọc được thư viện: " + str(e))
+    else:
+        st.info("Chưa có dữ liệu. Hãy tạo bài hát ở tab ✨ trước nhé.")
+    st.markdown('</div>', unsafe_allow_html=True)
+
+# ============ TAB 3: LỊCH SỬ ============
+with tab_history:
+    if os.path.exists(HISTORY_CSV):
+        try:
+            import pandas as pd
+            st.markdown('<div class="card">', unsafe_allow_html=True)
+            st.markdown("### 🗂️ Lịch sử tạo nhạc (bảng)")
+            df = load_history_df()
+            st.dataframe(df, use_container_width=True, height=360)
+            st.download_button(
+                "⬇️ Tải CSV lịch sử",
+                df.to_csv(index=False).encode("utf-8"),
+                file_name="tracks_history.csv",
+                mime="text/csv",
+                use_container_width=True,
+            )
+            st.markdown('</div>', unsafe_allow_html=True)
+        except Exception as e:
+            st.error("Không đọc được bài trước: " + str(e))
+    else:
+        st.info("Chưa có bài hát nào. Tạo bài hát ở tab ✨ trước nhé.")
+
+# ============ TAB 4: CÀI ĐẶT ============
+with tab_settings:
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    st.markdown("### 🎨 Preset chủ đề nhanh")
+    preset = st.selectbox(
+        "Chọn nhanh",
+        [
+            "Màu sắc cơ bản","Hình tròn – vuông – tam giác","Số đếm 1 – 10","Vệ sinh răng miệng",
+            "Chào hỏi & phép lịch sự","An toàn giao thông","Con vật","Gia đình","Nghề nghiệp",
+            "Trường mầm non","Bản thân bé","Thầy cô và bạn bè"
+        ],
+    )
+    st.caption("Chọn preset rồi copy sang tab ✨.")
+
+    st.divider()
+    st.markdown("### ℹ️ Ghi chú")
+    st.markdown(
+        "- **Refine** chỉ chỉnh lời hiện tại, không đổi chủ đề.\n"
+        "- **Instrumental** yêu cầu Suno tạo giai điệu không lời."
+    )
+    st.markdown('</div>', unsafe_allow_html=True)
+
+# ===========  FOOTER ===========
 st.markdown("""
 <hr style="margin:24px 0; border:none; border-top:1px solid #e6e8f5;">
 <div style="text-align:center; margin-top:8px; line-height:1.7;">
@@ -387,6 +741,17 @@ st.markdown("""
   </div>
 </div>
 """, unsafe_allow_html=True)
+
+
+
+
+
+
+
+
+
+
+
 
 
 
