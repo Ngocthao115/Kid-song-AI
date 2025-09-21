@@ -346,9 +346,9 @@ def load_history_df_supabase():
         st.warning(f"Không tải được lịch sử từ Supabase: {e}")
         return None
 
-
         except Exception as e:
             st.error(str(e))
+            
 # ============ 4) UI / THEME ============
 st.set_page_config(page_title="Kids Song AI", page_icon="🎵", layout="centered")
 st.markdown("""
@@ -752,6 +752,7 @@ st.markdown("""
   </div>
 </div>
 """, unsafe_allow_html=True)
+
 
 
 
