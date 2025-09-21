@@ -293,7 +293,7 @@ with st.sidebar:
 
 # Header & Tabs
 st.title("🎵 Kids Song AI")
-st.markdown('<span class="badge">OpenAI Lyrics • Suno Music</span>', unsafe_allow_html=True)
+st.markdown('<span class="badge">OpenAI Lyrics • Suno Music *Preschool Education</span>', unsafe_allow_html=True)
 
 tab_make, tab_library, tab_history, tab_settings = st.tabs(["✨ Tạo bài hát", "📚 Thư viện", "🗂️ Lịch sử", "⚙️ Cài đặt"])
 
@@ -603,10 +603,11 @@ with tab_settings:
 st.markdown("""
 <hr style="margin:24px 0; border:none; border-top:1px solid #e6e8f5;">
 <div style="text-align:center; margin-top:8px; line-height:1.7;">
-  <div style="font-weight:800; font-size:18px;">© Kids Song AI • OpenAI Lyrics + Suno Music • Supabase Persist</div>
+  <div style="font-weight:800; font-size:18px;">© Kids Song AI • OpenAI Lyrics + Suno Music - Dành cho Giáo viên mầm non</div>
   <div style="font-size:15px; color:#64748b;">Ngọc Thảo – <a href=\"mailto:ms.nthaotran@gmail.com\">ms.nthaotran@gmail.com</a></div>
 </div>
 """, unsafe_allow_html=True)
+
 
 
 
