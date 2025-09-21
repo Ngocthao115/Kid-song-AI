@@ -26,7 +26,7 @@ DEFAULT_SUNOSTYLE = get_secret("DEFAULT_SUNOSTYLE", "Kids, cheerful, playful, ed
 # --- Supabase (mới): dùng để KHÔNG MẤT thư viện & lịch sử ---
 SUPABASE_URL      = get_secret("SUPABASE_URL")
 SUPABASE_KEY      = get_secret("SUPABASE_KEY")  # dùng anon key là đủ cho đọc/ghi nếu bucket public và có policy phù hợp
-SUPABASE_BUCKET   = get_secret("SUPABASE_BUCKET", "kids-songs")
+SUPABASE_BUCKET   = get_secret("SUPABASE_BUCKET", "Kids_songs")
 SUPABASE_TABLE    = get_secret("SUPABASE_TABLE", "tracks")
 
 # Client OpenAI (SDK >= 1.40)
@@ -548,9 +548,12 @@ with tab_make:
 with tab_library:
     st.markdown('<div class="card">', unsafe_allow_html=True)
     st.markdown("### 📚 Thư viện (Gallery)")
+    data_source = "local"
 
     # Ưu tiên lấy từ Supabase; nếu không có thì lấy từ CSV local
     df = load_history_df_supabase()
+    if df is not None:
+        data_source = "supabase"
     if df is None:
         if os.path.exists(HISTORY_CSV):
             try:
@@ -582,6 +585,9 @@ with tab_library:
                 df = df[mask]
             if style_pick and style_pick != "Tất cả" and "style" in df.columns:
                 df = df[df["style"] == style_pick]
+
+            # Hiển thị nguồn dữ liệu
+            st.caption(f"Nguồn dữ liệu: **{'Supabase' if data_source=='supabase' else 'Local CSV'}**")
 
             # Grid gallery
             if len(df) == 0:
@@ -655,6 +661,37 @@ with tab_history:
 # ============ TAB 4: CÀI ĐẶT ============
 with tab_settings:
     st.markdown('<div class="card">', unsafe_allow_html=True)
+    st.markdown("### ✅ Kiểm tra Supabase")
+    colsb1, colsb2 = st.columns(2)
+    with colsb1:
+        if supabase:
+            try:
+                # Đếm số bản ghi trong bảng tracks
+                res = supabase.table(SUPABASE_TABLE).select("count()", count='exact').execute()
+                total_rows = (res.count or 0)
+            except Exception:
+                total_rows = None
+            st.metric(label="Số bản ghi trong bảng", value= total_rows if total_rows is not None else "—")
+        else:
+            st.info("Chưa cấu hình Supabase URL/KEY")
+    with colsb2:
+        if supabase:
+            try:
+                # Liệt kê vài file mới trong bucket mp3/
+                files = supabase.storage.from_(SUPABASE_BUCKET).list("mp3", {"limit":5, "offset":0, "sortBy":{"column":"created_at","order":"desc"}})
+                file_names = [f.get('name') if isinstance(f, dict) else getattr(f, 'name', '') for f in (files or [])]
+                if file_names:
+                    st.write("**5 tệp MP3 mới nhất (bucket):**")
+                    for nm in file_names:
+                        st.write("- ", nm)
+                else:
+                    st.write("Chưa có tệp trong mp3/ hoặc không lấy được danh sách.")
+            except Exception as e:
+                st.warning(f"Không thể liệt kê bucket: {e}")
+        else:
+            st.empty()
+
+    st.divider()
     st.markdown("### 🎨 Preset chủ đề nhanh")
     preset = st.selectbox(
         "Chọn nhanh",
