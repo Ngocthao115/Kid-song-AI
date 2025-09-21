@@ -49,10 +49,10 @@ HEADERS = {"Authorization": f"Bearer {SUNO_API_KEY}", "Content-Type": "applicati
 # Kết nối Supabase (nếu cung cấp URL & KEY)
 supabase = None
 supabase_status = "❌"
-if SUPABASE_URL and SUPABASE_KEY:
+if SUPABASE_URL and SUPABASE_ANON_KEY:
     try:
         from supabase import create_client, Client  # pip install supabase
-        supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+        supabase = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
         supabase_status = "✅"
     except Exception as e:
         st.warning(f"Không khởi tạo được Supabase client: {e}")
@@ -723,6 +723,7 @@ st.markdown("""
   </div>
 </div>
 """, unsafe_allow_html=True)
+
 
 
 
