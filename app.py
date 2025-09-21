@@ -25,7 +25,7 @@ DEFAULT_SUNOSTYLE = get_secret("DEFAULT_SUNOSTYLE", "Kids, cheerful, playful, ed
 
 # --- Supabase (mới): dùng để KHÔNG MẤT thư viện & lịch sử ---
 SUPABASE_URL      = get_secret("SUPABASE_URL")
-SUPABASE_ANON_KEY = get_secret("SUPABASE_ANON_KEY")  # dùng anon key là đủ cho đọc/ghi nếu bucket public và có policy phù hợp
+SUPABASE_KEY      = get_secret("SUPABASE_KEY")  # dùng anon key là đủ cho đọc/ghi nếu bucket public và có policy phù hợp
 SUPABASE_BUCKET   = get_secret("SUPABASE_BUCKET", "kids-songs")
 SUPABASE_TABLE    = get_secret("SUPABASE_TABLE", "tracks")
 
@@ -49,10 +49,10 @@ HEADERS = {"Authorization": f"Bearer {SUNO_API_KEY}", "Content-Type": "applicati
 # Kết nối Supabase (nếu cung cấp URL & KEY)
 supabase = None
 supabase_status = "❌"
-if SUPABASE_URL and SUPABASE_ANON_KEY:
+if SUPABASE_URL and SUPABASE_KEY:
     try:
         from supabase import create_client, Client  # pip install supabase
-        supabase = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
+        supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
         supabase_status = "✅"
     except Exception as e:
         st.warning(f"Không khởi tạo được Supabase client: {e}")
@@ -317,7 +317,7 @@ def load_history_df_local():
 
 
 def load_history_df_supabase():
-    """Ưu tiên đọc lịch sử."""
+    """Ưu tiên đọc lịch sử từ Supabase table nếu có, fallback None nếu lỗi/chưa cấu hình."""
     if not supabase:
         return None
     try:
@@ -384,7 +384,7 @@ with st.sidebar:
 
 # — Header
 st.title("🎵 Kids Song AI")
-st.markdown('<span class="badge">OpenAI Lyrics • Suno Music • Supabase Persist</span>', unsafe_allow_html=True)
+st.markdown('<span class="badge">OpenAI Lyrics • Suno Music</span>', unsafe_allow_html=True)
 
 # — Tabs
 tab_make, tab_library, tab_history, tab_settings = st.tabs(["✨ Tạo bài hát", "📚 Thư viện", "🗂️ Lịch sử", "⚙️ Cài đặt"])
@@ -531,9 +531,9 @@ with tab_make:
                 k1, k2 = st.columns([1, 2])
                 with k1:
                     if cover_path and os.path.exists(cover_path):
-                        st.image(cover_path, caption="Ảnh bìa", use_column_width=True)
+                        st.image(cover_path, caption="Ảnh bìa", use_container_width=True)
                     elif image_url_final:
-                        st.image(image_url_final, caption="Ảnh bìa", use_column_width=True)
+                        st.image(image_url_final, caption="Ảnh bìa", use_container_width=True)
                 with k2:
                     st.write(f"**{st.session_state.title or 'Kids Song'} — Bản {i}**")
                     if mp3_path and os.path.exists(mp3_path):
@@ -563,7 +563,7 @@ with tab_make:
                 write_history_row(row)
 
             st.balloons()
-            st.info("Đã lưu vào Supabase và thư mục local. Xem ở tab 📚 Thư viện.")
+            st.info("Đã lưu vào Supabase (nếu cấu hình) và thư mục local. Xem ở tab 📚 Thư viện.")
         except Exception as e:
             st.error(str(e))
 
@@ -630,11 +630,11 @@ with tab_library:
 
                         # ảnh bìa
                         if cover and os.path.exists(cover):
-                            st.image(cover, use_column_width=True)
+                            st.image(cover, use_container_width=True)
                         elif image_url:
-                            st.image(image_url, use_column_width=True)
+                            st.image(image_url, use_container_width=True)
                         else:
-                            st.image("https://picsum.photos/seed/kidsmusic/600/400", use_column_width=True)
+                            st.image("https://picsum.photos/seed/kidsmusic/600/400", use_container_width=True)
 
                         st.markdown(f"<h4>{title}</h4><div style='color:#64748b'>{subtitle}</div>", unsafe_allow_html=True)
 
@@ -748,8 +748,6 @@ st.markdown("""
   </div>
 </div>
 """, unsafe_allow_html=True)
-
-
 
 
 
