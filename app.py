@@ -679,13 +679,14 @@ st.markdown("""
 <hr style="margin:24px 0; border:none; border-top:1px solid #e6e8f5;">
 <div style="text-align:center; margin-top:8px; line-height:1.7;">
   <div style="font-weight:800; font-size:18px;">
-    © Kids Song AI • OpenAI Lyrics + Suno Music • Supabase Persist – Dành cho Giáo viên mầm non
+    © Kids Song AI • OpenAI Lyrics + Suno Music – Dành cho Giáo viên mầm non
   </div>
   <div style="font-size:15px; color:#64748b;">
     Ngọc Thảo – <a href="mailto:ms.nthaotran@gmail.com">ms.nthaotran@gmail.com</a>
   </div>
 </div>
 """, unsafe_allow_html=True)
+
 
 
 
