@@ -1,4 +1,4 @@
-import os, time, json, requests, datetime as dt, csv, re, io
+import os, time, json, requests, datetime as dt, csv, re, io, uuid
 from typing import List, Optional
 
 import streamlit as st
@@ -25,8 +25,8 @@ DEFAULT_SUNOSTYLE = get_secret("DEFAULT_SUNOSTYLE", "Kids, cheerful, playful, ed
 
 # --- Supabase (mới): dùng để KHÔNG MẤT thư viện & lịch sử ---
 SUPABASE_URL      = get_secret("SUPABASE_URL")
-SUPABASE_ANON_KEY = get_secret("SUPABASE_ANON_KEY")
-SUPABASE_BUCKET   = get_secret("SUPABASE_BUCKET", "Kids_songs")
+SUPABASE_ANON_KEY = get_secret("SUPABASE_ANON_KEY")  # dùng anon key là đủ cho đọc/ghi nếu bucket public và có policy phù hợp
+SUPABASE_BUCKET   = get_secret("SUPABASE_BUCKET", "kids-songs")
 SUPABASE_TABLE    = get_secret("SUPABASE_TABLE", "tracks")
 
 # Client OpenAI (SDK >= 1.40)
@@ -235,16 +235,16 @@ def ensure_history_schema():
 # --- Supabase helpers (mới) ---
 def sb_upload_bytes(bucket: str, path: str, data_bytes: bytes, content_type: str) -> Optional[str]:
     """Upload bytes lên Supabase Storage và trả về public URL (nếu cấu hình bucket public).
-    Lưu ý: supabase-py v2 kỳ vọng **bytes** hoặc **đường dẫn file**. Không dùng BytesIO để tránh lỗi.
+    Lưu ý: supabase-py v2 kỳ vọng **bytes** hoặc **đường dẫn file**.
     """
     if not supabase:
         return None
     try:
-        # Truyền thẳng bytes cho client (một số phiên bản yêu cầu bytes thay vì BytesIO)
+        # Truyền thẳng bytes cho client (không dùng BytesIO)
         supabase.storage.from_(bucket).upload(
             path,
-            data_bytes,  # <- bytes, không dùng BytesIO
-            {"content-type": content_type, "upsert": True}
+            data_bytes,
+            {"contentType": content_type, "upsert": "true"}
         )
         pub = supabase.storage.from_(bucket).get_public_url(path)
         if isinstance(pub, dict) and "publicUrl" in pub:
@@ -258,10 +258,27 @@ def supabase_upsert_track(row: dict) -> None:
     if not supabase:
         return
     try:
-        # Upsert theo cặp khóa (time, track_index) để tránh trùng
+        # Thử upsert theo schema mở rộng (CSV cũ)
         supabase.table(SUPABASE_TABLE).upsert(row, on_conflict="time,track_index").execute()
-    except Exception as e:
-        st.warning(f"Ghi bản ghi Supabase thất bại: {e}")
+        return
+    except Exception as e1:
+        # Fallback: schema tối giản như ảnh em gửi (id, title, style, lyrics_url, audio_url, cover_url, created_at, uploader)
+        try:
+            simple_row = {
+                "id": str(uuid.uuid4()),
+                "title": row.get("title", ""),
+                "style": row.get("style", ""),
+                "lyrics_url": row.get("lyrics_url", ""),
+                "audio_url": row.get("audio_url", ""),
+                "cover_url": row.get("image_url", ""),
+                "created_at": dt.datetime.utcnow().isoformat(),
+                "uploader": "kids-song-ai",
+            }
+            supabase.table(SUPABASE_TABLE).insert(simple_row).execute()
+            st.info("Đã chèn bản ghi theo schema đơn giản (id/title/style/lyrics_url/audio_url/cover_url/created_at/uploader).")
+        except Exception as e2:
+            st.warning("Ghi bản ghi Supabase thất bại (cả 2 schema): " + str(e1) + " | " + str(e2) + "
+Hãy kiểm tra lại cột bảng hoặc đổi SUPABASE_TABLE cho khớp.")
 
 
 def write_history_row(row: dict) -> None:
@@ -301,7 +318,7 @@ def load_history_df_local():
 
 
 def load_history_df_supabase():
-    """Ưu tiên đọc lịch sử từ Supabase table nếu có, fallback None nếu lỗi/chưa cấu hình."""
+    """Ưu tiên đọc lịch sử."""
     if not supabase:
         return None
     try:
@@ -496,6 +513,12 @@ with tab_make:
                 # --- NEW: Upload lên Supabase Storage (nếu có) ---
                 audio_url_pub = None
                 image_url_pub = None
+                lyrics_url_pub = None
+                if st.session_state.get("lyrics"):
+                    try:
+                        lyrics_url_pub = sb_upload_bytes(SUPABASE_BUCKET, f"lyrics/{ts}_{i}_{base}.txt", st.session_state.lyrics.encode("utf-8"), "text/plain")
+                    except Exception:
+                        pass
                 if audio_bytes:
                     audio_url_pub = sb_upload_bytes(SUPABASE_BUCKET, f"mp3/{ts}_{i}_{base}.mp3", audio_bytes, "audio/mpeg")
                 if img_bytes:
@@ -536,11 +559,12 @@ with tab_make:
                     "model": SUNO_MODEL,
                     "mp3_path": mp3_path,
                     "cover_path": cover_path,
+                    "lyrics_url": lyrics_url_pub or "",
                 }
                 write_history_row(row)
 
             st.balloons()
-            st.info("Đã lưu vào Supabase (nếu cấu hình) và thư mục local. Xem ở tab 📚 Thư viện.")
+            st.info("Đã lưu vào Supabase và thư mục local. Xem ở tab 📚 Thư viện.")
         except Exception as e:
             st.error(str(e))
 
@@ -554,9 +578,9 @@ with tab_library:
 
     # Ưu tiên lấy từ Supabase; nếu không có thì lấy từ CSV local
     df = load_history_df_supabase()
-    if df is not None:
+    if df is not None and len(df) > 0:
         data_source = "supabase"
-    if df is None:
+    if (df is None) or (len(df) == 0):
         if os.path.exists(HISTORY_CSV):
             try:
                 import pandas as pd
@@ -638,7 +662,7 @@ with tab_library:
 with tab_history:
     # Ưu tiên lấy từ Supabase; nếu không có thì lấy CSV
     df_hist = load_history_df_supabase()
-    if df_hist is None and os.path.exists(HISTORY_CSV):
+    if (df_hist is None or len(df_hist) == 0) and os.path.exists(HISTORY_CSV):
         df_hist = load_history_df_local()
 
     if df_hist is not None and len(df_hist) > 0:
@@ -725,25 +749,6 @@ st.markdown("""
   </div>
 </div>
 """, unsafe_allow_html=True)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
