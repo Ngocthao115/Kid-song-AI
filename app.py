@@ -538,8 +538,13 @@ with tab_make:
                         with open(mp3_path, "rb") as f:
                             st.audio(f.read(), format="audio/mp3", key=f"audio-{ts}-{i}")  # ✅ thêm key
                         with open(mp3_path, "rb") as f:
-                            st.download_button("⬇️ Tải MP3", data=f, file_name=os.path.basename(mp3_path),
-                                                mime="audio/mpeg", use_container_width=True, key=f"dl-{ts}-{i}"  # ✅ thêm key)
+                            st.download_button(
+                                "⬇️ Tải MP3", 
+                                data=f, 
+                                ile_name=os.path.basename(mp3_path),
+                                mime="audio/mpeg", 
+                                use_container_width=True, key=f"dl-{ts}-{i}"  # ✅ thêm key
+                        )
                 elif audio_url:
                     st.audio(audio_url, format="audio/mp3", key=f"audio-url-{ts}-{i}")  # ✅ thêm key
 
@@ -729,6 +734,7 @@ st.markdown("""
   </div>
 </div>
 """, unsafe_allow_html=True)
+
 
 
 
