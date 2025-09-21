@@ -1,8 +1,6 @@
 streamlit>=1.36
-pydantic>=2.7
-python-dotenv>=1.0
-numpy>=1.26
-pandas>=2.2
-requests>=2.32
-Pillow>=10.2
 openai>=1.40
+supabase>=2.4.0
+requests>=2.32
+Pillow>=10.2   # (tuỳ chọn, chỉ để hiển thị ảnh bìa; có thể giữ)
+python-dotenv>=1.0  # (tuỳ chọn, chỉ dùng khi chạy local với .env)
