@@ -563,7 +563,7 @@ with tab_make:
                 write_history_row(row)
 
             st.balloons()
-            st.info("Đã lưu vào Supabase (nếu cấu hình) và thư mục local. Xem ở tab 📚 Thư viện.")
+            st.info("Đã lưu vào Supabase và thư mục local. Xem ở tab 📚 Thư viện.")
         except Exception as e:
             st.error(str(e))
 
@@ -687,13 +687,14 @@ with tab_history:
 with tab_settings:
     st.markdown('<div class="card">', unsafe_allow_html=True)
     st.markdown("### ✅ Kiểm tra Supabase")
+    # Công cụ kiểm tra trực tiếp trong app
     colsb1, colsb2 = st.columns(2)
     with colsb1:
         if supabase:
             try:
-                # Đếm số bản ghi trong bảng tracks
-                res = supabase.table(SUPABASE_TABLE).select("count()", count='exact').execute()
-                total_rows = (res.count or 0)
+                # Đếm số bản ghi trong bảng nhanh (không tải dữ liệu)
+                res = supabase.table(SUPABASE_TABLE).select('*', count='exact').range(0,0).execute()
+                total_rows = res.count or 0
             except Exception:
                 total_rows = None
             st.metric(label="Số bản ghi trong bảng", value= total_rows if total_rows is not None else "—")
@@ -701,18 +702,39 @@ with tab_settings:
             st.info("Chưa cấu hình Supabase URL/KEY")
     with colsb2:
         if supabase:
-            try:
-                # Liệt kê vài file mới trong bucket mp3/
-                files = supabase.storage.from_(SUPABASE_BUCKET).list("mp3", {"limit":5, "offset":0, "sortBy":{"column":"created_at","order":"desc"}})
-                file_names = [f.get('name') if isinstance(f, dict) else getattr(f, 'name', '') for f in (files or [])]
-                if file_names:
-                    st.write("**5 tệp MP3 mới nhất (bucket):**")
-                    for nm in file_names:
-                        st.write("- ", nm)
-                else:
-                    st.write("Chưa có tệp trong mp3/ hoặc không lấy được danh sách.")
-            except Exception as e:
-                st.warning(f"Không thể liệt kê bucket: {e}")
+            # Nút liệt kê file trong Storage và nút upload file test
+            btn_list = st.button("🔎 Liệt kê Storage (mp3/ & covers/)", use_container_width=True)
+            btn_probe = st.button("🧪 Upload file test", use_container_width=True)
+            if btn_probe:
+                try:
+                    ts = dt.datetime.utcnow().strftime('%Y%m%d-%H%M%S')
+                    test_path = f"tests/{ts}_hello.txt"
+                    puburl = sb_upload_bytes(SUPABASE_BUCKET, test_path, b"hello from Kids Song AI", "text/plain")
+                    if puburl:
+                        st.success("Đã upload file test: ")
+                        st.markdown(f"- `{test_path}` → [Mở file]({puburl})")
+                    else:
+                        st.warning("Upload test không thành công (xem cảnh báo ở trên nếu có).")
+                except Exception as e:
+                    st.warning(f"Lỗi upload test: {e}")
+            if btn_list:
+                try:
+                    mp3_files = supabase.storage.from_(SUPABASE_BUCKET).list("mp3") or []
+                    cov_files = supabase.storage.from_(SUPABASE_BUCKET).list("covers") or []
+                    st.write(f"**mp3/**: {len(mp3_files)} tệp")
+                    for f in mp3_files[:10]:
+                        name = f.get('name') if isinstance(f, dict) else getattr(f, 'name', '')
+                        url = supabase.storage.from_(SUPABASE_BUCKET).get_public_url(f"mp3/{name}")
+                        show = url['publicUrl'] if isinstance(url, dict) else str(url)
+                        st.markdown(f"- `{name}` → [mở]({show})")
+                    st.write(f"**covers/**: {len(cov_files)} tệp")
+                    for f in cov_files[:10]:
+                        name = f.get('name') if isinstance(f, dict) else getattr(f, 'name', '')
+                        url = supabase.storage.from_(SUPABASE_BUCKET).get_public_url(f"covers/{name}")
+                        show = url['publicUrl'] if isinstance(url, dict) else str(url)
+                        st.markdown(f"- `{name}` → [mở]({show})")
+                except Exception as e:
+                    st.warning(f"Không thể liệt kê bucket: {e}")
         else:
             st.empty()
 
@@ -748,11 +770,6 @@ st.markdown("""
   </div>
 </div>
 """, unsafe_allow_html=True)
-
-
-
-
-
 
 
 
