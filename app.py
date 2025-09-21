@@ -366,7 +366,7 @@ with st.sidebar:
 
 # — Header
 st.title("🎵 Kids Song AI")
-st.markdown('<span class="badge">OpenAI Lyrics • Suno Music • Preschool Education</span>', unsafe_allow_html=True)
+st.markdown('<span class="badge">OpenAI Lyrics • Suno Music • Supabase Persist</span>', unsafe_allow_html=True)
 
 # — Tabs
 tab_make, tab_library, tab_history, tab_settings = st.tabs(["✨ Tạo bài hát", "📚 Thư viện", "🗂️ Lịch sử", "⚙️ Cài đặt"])
@@ -517,7 +517,8 @@ with tab_make:
                             st.audio(f.read(), format="audio/mp3")
                         with open(mp3_path, "rb") as f:
                             st.download_button("⬇️ Tải MP3", data=f, file_name=os.path.basename(mp3_path),
-                                               mime="audio/mpeg", use_container_width=True)
+                                               mime="audio/mpeg", use_container_width=True,
+                                               key=f"dl_now_{ts}_{i}")
                     elif audio_url_final:
                         st.audio(audio_url_final, format="audio/mp3")
 
@@ -614,7 +615,8 @@ with tab_library:
                                 st.audio(f.read(), format="audio/mp3")
                             with open(mp3_path, "rb") as f:
                                 st.download_button("⬇️ Tải MP3", data=f, file_name=os.path.basename(mp3_path),
-                                                   mime="audio/mpeg", use_container_width=True)
+                                                   mime="audio/mpeg", use_container_width=True,
+                                                   key=f"dl_lib_{row.get('time','')}_{int(float(row.get('track_index', idx%4+1)))}_{idx}")
                         elif audio_url:
                             st.audio(audio_url, format="audio/mp3")
 
@@ -669,8 +671,6 @@ with tab_settings:
     st.markdown(
         "- **Refine** chỉ chỉnh lời hiện tại, không đổi chủ đề.\n"
         "- **Instrumental** yêu cầu Suno tạo giai điệu không lời.\n"
-        "- **Supabase**: cấu hình **SUPABASE_URL**, **SUPABASE_KEY**, **SUPABASE_BUCKET**, **SUPABASE_TABLE** trong Secrets.\n"
-        "  • Bucket cần public read để hiển thị audio/ảnh trực tiếp.\n"
     )
     st.markdown('</div>', unsafe_allow_html=True)
 
@@ -686,7 +686,6 @@ st.markdown("""
   </div>
 </div>
 """, unsafe_allow_html=True)
-
 
 
 
