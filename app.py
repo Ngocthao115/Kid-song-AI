@@ -234,17 +234,19 @@ def ensure_history_schema():
 
 # --- Supabase helpers (mới) ---
 def sb_upload_bytes(bucket: str, path: str, data_bytes: bytes, content_type: str) -> Optional[str]:
-    """Upload bytes lên Supabase Storage và trả về public URL (nếu cấu hình bucket public)."""
+    """Upload bytes lên Supabase Storage và trả về public URL (nếu cấu hình bucket public).
+    Lưu ý: supabase-py v2 kỳ vọng **bytes** hoặc **đường dẫn file**. Không dùng BytesIO để tránh lỗi.
+    """
     if not supabase:
         return None
     try:
-        file_obj = io.BytesIO(data_bytes)
-        file_obj.seek(0)
-        # v2 API: upload(path, file, file_options)
-        supabase.storage.from_(bucket).upload(path, file_obj, {"content-type": content_type, "upsert": True})
-        # Lấy public URL (yêu cầu bucket để public read)
+        # Truyền thẳng bytes cho client (một số phiên bản yêu cầu bytes thay vì BytesIO)
+        supabase.storage.from_(bucket).upload(
+            path,
+            data_bytes,  # <- bytes, không dùng BytesIO
+            {"content-type": content_type, "upsert": True}
+        )
         pub = supabase.storage.from_(bucket).get_public_url(path)
-        # Một số bản trả về dict {'publicUrl': '...'}; xử lý cả 2 trường hợp
         if isinstance(pub, dict) and "publicUrl" in pub:
             return pub["publicUrl"]
         return str(pub)
@@ -723,6 +725,7 @@ st.markdown("""
   </div>
 </div>
 """, unsafe_allow_html=True)
+
 
 
 
