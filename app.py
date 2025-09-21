@@ -277,8 +277,7 @@ def supabase_upsert_track(row: dict) -> None:
             supabase.table(SUPABASE_TABLE).insert(simple_row).execute()
             st.info("Đã chèn bản ghi theo schema đơn giản (id/title/style/lyrics_url/audio_url/cover_url/created_at/uploader).")
         except Exception as e2:
-            st.warning("Ghi bản ghi Supabase thất bại (cả 2 schema): " + str(e1) + " | " + str(e2) + "
-Hãy kiểm tra lại cột bảng hoặc đổi SUPABASE_TABLE cho khớp.")
+            st.warning("Ghi bản ghi Supabase thất bại (cả 2 schema): " + str(e1) + " | " + str(e2) + "Hãy kiểm tra lại cột bảng hoặc đổi SUPABASE_TABLE cho khớp.")
 
 
 def write_history_row(row: dict) -> None:
@@ -749,6 +748,7 @@ st.markdown("""
   </div>
 </div>
 """, unsafe_allow_html=True)
+
 
 
 
