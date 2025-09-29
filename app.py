@@ -311,10 +311,10 @@ with tab_make:
         language = st.selectbox("Ngôn ngữ", ["Vi", "En"], index=0)
         style = st.selectbox("Phong cách nhạc", [
             DEFAULT_SUNOSTYLE,
-            "Kids, gentle, soothing, lullaby, warm",
-            "Kids, cute pop, claps, ukulele",
-            "Kids, upbeat, bright, classroom sing-along",
-            "Instrumental lullaby, gentle, soft piano + strings",
+            "Nhẹ nhàng, ấm áp,hát ru",
+            "Pop dễ thương, vỗ tay, vui nhộn",
+            "Lạc quan, tươi sáng, lớp học hát",
+            "Êm dịu, piano nhẹ nhàng, hát ru",
         ], index=0)
     st.markdown('</div>', unsafe_allow_html=True)
 
@@ -603,10 +603,11 @@ with tab_settings:
 st.markdown("""
 <hr style="margin:24px 0; border:none; border-top:1px solid #e6e8f5;">
 <div style="text-align:center; margin-top:8px; line-height:1.7;">
-  <div style="font-weight:800; font-size:18px;">© Kids Song AI • OpenAI Lyrics + Suno Music - Dành cho Giáo viên mầm non</div>
+  <div style="font-weight:800; font-size:18px;">© Kids Song AI • Dành cho Giáo viên mầm non</div>
   <div style="font-size:15px; color:#64748b;">Ngọc Thảo – <a href=\"mailto:ms.nthaotran@gmail.com\">ms.nthaotran@gmail.com</a></div>
 </div>
 """, unsafe_allow_html=True)
+
 
 
 
