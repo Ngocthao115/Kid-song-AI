@@ -690,7 +690,7 @@ with tab_settings:
     )
     st.markdown('</div>', unsafe_allow_html=True)
     
-/* GIAO DIỆN TAB
+#GIAO DIỆN TAB
 st.markdown("""
 <style>
 /* 1) Ẩn underline mặc định của st.tabs */
@@ -745,6 +745,7 @@ st.markdown("""
   <div style="font-size:15px; color:#64748b;">Ngọc Thảo – <a href=\"mailto:ms.nthaotran@gmail.com\">ms.nthaotran@gmail.com</a></div>
 </div>
 """, unsafe_allow_html=True)
+
 
 
 
