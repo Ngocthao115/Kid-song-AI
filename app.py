@@ -262,7 +262,7 @@ st.markdown("""
 /* ====== Pastel Design Tokens ====== */
 :root{
   --bg: #FFFFFF;                 /* nền chính (trắng) */
-  --bg-soft: #FFF6F1;            /* nền phụ (cam-đào) */
+  --bg-soft: #FFFFFF;            /* nền phụ (trắng) */
   --primary: #FFB996;            /* cam-đào pastel (điểm nhấn) */
   --primary-strong: #FFA97A;     /* hover/active */
   --chip: #FDE3D6;               /* chip, badge */
@@ -698,6 +698,7 @@ st.markdown("""
   <div style="font-size:15px; color:#64748b;">Ngọc Thảo – <a href=\"mailto:ms.nthaotran@gmail.com\">ms.nthaotran@gmail.com</a></div>
 </div>
 """, unsafe_allow_html=True)
+
 
 
 
