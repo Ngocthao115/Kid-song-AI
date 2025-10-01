@@ -256,24 +256,79 @@ def load_history_df_supabase():
         return None
 
 # ================== 4) UI / THEME ==================
+import streamlit as st
+
 st.set_page_config(page_title="Kids Song AI", page_icon="🎵", layout="centered")
-st.markdown(
-    """
+
+# ⬇️ ĐẶT KHỐI NÀY CUỐI CÙNG trong phần UI để override sạch
+st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Fredoka:wght@400;600&family=Inter:wght@400;600;700&display=swap');
-:root { --radius: 16px; }
-h1,h2,h3 { font-family: 'ui-monospace', SFMono-Regular, Menlo, Monaco, "Courier New", monospace; }
-body, p, div, span { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, "Courier New", monospace; }
-.main .block-container { padding-top: 2rem; padding-bottom: 3rem; max-width: 980px; background-color: #FFC0CB; }
-.card { background:#fff; border-radius:var(--radius, 16px); padding:1rem 1.25rem; box-shadow:0 10px 18px rgba(15,23,42,.06); border:1px solid rgba(15,23,42,.06); margin-bottom:1rem; }
-.badge { display:inline-flex; align-items:center; gap:.4rem; padding:.35rem .7rem; border-radius:999px; background:#FCEFF; color:#0E7490; font-size:.78rem; font-weight:700; letter-spacing:.2px; }
-.stButton>button { border-radius:12px; padding:.6rem 1rem; font-weight:700; background-color: #00CC66 !important; border: none; font-size: 16px; }
-.card-sm { border:1px solid #E2E8F0; border-radius:14px; padding:10px; box-shadow:0 4px 10px rgba(15,23,42,.05); }
-.status { font-size:.85rem; color:#0f172a; background:#F1F5F9; border:1px solid #E2E8F0; padding:.25rem .5rem; border-radius:8px; }
+/* Font dễ thương, tròn */
+@import url('https://fonts.googleapis.com/css2?family=Fredoka:wght@400;600&display=swap');
+
+/* 1) NỀN TOÀN CỤC */
+html, body, .stApp {
+  background: #FFEFF6 !important;           /* hồng phấn rất nhạt */
+}
+
+/* 2) KHỐI NỘI DUNG CHÍNH */
+.main .block-container {
+  background: #FFFFFF !important;
+  border-radius: 16px !important;
+  padding: 2rem 2rem 3rem !important;
+  box-shadow: 0 10px 18px rgba(15,23,42,.06);
+}
+
+/* 3) SIDEBAR (nền phụ hồng đậm hơn) */
+section[data-testid="stSidebar"] > div {
+  background: #FFB6C1 !important;            /* hồng đậm hơn */
+}
+
+/* 4) KIỂU CHỮ TOÀN APP */
+html, body, [class*="css"], .stMarkdown, .stTextInput input,
+.stTextArea textarea, .stSelectbox, .stRadio label, .stSlider {
+  font-family: 'Fredoka', system-ui, -apple-system, "Segoe UI", Roboto, sans-serif !important;
+  color: #1F2335;
+}
+
+/* 5) NÚT – selector mạnh cho mọi biến thể Streamlit */
+button[kind="primary"],
+button[data-testid="baseButton-primary"],
+div.stButton > button,
+div.stDownloadButton > button {
+  background-color: #FF69B4 !important;      /* hồng tươi – đẹp hơn xanh lá chói */
+  border-color: #FF69B4 !important;
+  color: #FFFFFF !important;
+  border-radius: 12px !important;
+  padding: 0.6rem 1.2rem !important;
+  font-weight: 600 !important;
+  font-size: 16px !important;
+  border: none !important;
+  box-shadow: 0 4px 8px rgba(0,0,0,0.12) !important;
+  transition: transform .15s ease, filter .15s ease;
+}
+button[kind="primary"]:hover,
+button[data-testid="baseButton-primary"]:hover,
+div.stButton > button:hover,
+div.stDownloadButton > button:hover {
+  filter: brightness(0.92) !important;
+  transform: translateY(-1px);
+}
+
+/* 6) INPUT/PLACEHOLDER nhìn “dịu” */
+::placeholder {
+  color: rgba(31,35,53,.55) !important;
+}
+
+/* 7) BADGE/CARD nếu em có dùng class này */
+.badge { display:inline-flex; align-items:center; gap:.4rem;
+  padding:.35rem .7rem; border-radius:999px; background:#FCEFFF; color:#0E7490;
+  font-size:.8rem; font-weight:700; letter-spacing:.2px; }
+.card  { background:#fff; border-radius:16px; padding:1.1rem;
+  box-shadow:0 10px 18px rgba(15,23,42,.06); border:1px solid rgba(15,23,42,.06); }
 </style>
-""",
-    unsafe_allow_html=True,
-)
+""", unsafe_allow_html=True)
+
 
 # State
 if "lyrics" not in st.session_state: st.session_state.lyrics = ""
@@ -607,6 +662,7 @@ st.markdown("""
   <div style="font-size:15px; color:#64748b;">Ngọc Thảo – <a href=\"mailto:ms.nthaotran@gmail.com\">ms.nthaotran@gmail.com</a></div>
 </div>
 """, unsafe_allow_html=True)
+
 
 
 
