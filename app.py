@@ -689,7 +689,18 @@ with tab_settings:
         "- **Instrumental** yêu cầu Suno tạo giai điệu không lời.\n"
     )
     st.markdown('</div>', unsafe_allow_html=True)
-
+    
+/* 3) GIAO DIỆN TAB
+.stTabs button[role="tab"],
+.stTabs div[data-baseweb="tab"] > button{
+  background: var(--chip, #FFE8D9) !important;   /* pastel nhẹ */
+  color: var(--text, #2D2D2D) !important;
+  border: 1px solid var(--ring, #FFD7C3) !important;
+  border-radius: 999px !important;
+  padding: .4rem .9rem !important;
+  font-weight: 600 !important;
+  transition: transform .12s ease, filter .12s ease;
+}
 # ================== FOOTER ==================
 st.markdown("""
 <hr style="margin:24px 0; border:none; border-top:1px solid #e6e8f5;">
@@ -698,6 +709,7 @@ st.markdown("""
   <div style="font-size:15px; color:#64748b;">Ngọc Thảo – <a href=\"mailto:ms.nthaotran@gmail.com\">ms.nthaotran@gmail.com</a></div>
 </div>
 """, unsafe_allow_html=True)
+
 
 
 
