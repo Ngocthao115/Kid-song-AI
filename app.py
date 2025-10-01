@@ -376,7 +376,7 @@ if "generated" not in st.session_state: st.session_state.generated = False
 # Sidebar
 with st.sidebar:
     st.markdown("## 👩‍🏫 Hướng dẫn nhanh")
-    st.markdown("- **Bước 1:** Nhập Miêu tả/Từ khóa/Title (GV có thể ghi tên câu chuyện/bài thơ và dùng từ khóa trong đó để gợi ý) → **Tạo lời**.\n- **Bước 2:** Chỉnh tay hoặc Có thể copy bài thơ/câu chuyện rồi) "Refine" **để chia [ver]/[Chorus]**.\n- **Bước 3:** **Tạo nhạc**, xem ảnh bìa & tải file.\n- Xem lại ở **📚 Thư viện** hoặc **🗂️ Lịch sử**.")
+    st.markdown("- **Bước 1:** Nhập Miêu tả/Từ khóa/Title (GV có thể ghi tên câu chuyện/bài thơ và dùng từ khóa trong đó để gợi ý) → **Tạo lời**.\n- **Bước 2:** Chỉnh tay hoặc Có thể copy bài thơ/câu chuyện rồi Refine **để chia [ver]/[Chorus]**.\n- **Bước 3:** **Tạo nhạc**, xem ảnh bìa & tải file.\n- Xem lại ở **📚 Thư viện** hoặc **🗂️ Lịch sử**.")
     st.divider()
     st.caption(f"Model Suno: **{SUNO_MODEL}**")
     st.caption(f"Style mặc định: **{DEFAULT_SUNOSTYLE}**")
@@ -745,6 +745,7 @@ st.markdown("""
   <div style="font-size:15px; color:#64748b;">Ngọc Thảo – <a href=\"mailto:ms.nthaotran@gmail.com\">ms.nthaotran@gmail.com</a></div>
 </div>
 """, unsafe_allow_html=True)
+
 
 
 
