@@ -690,7 +690,7 @@ with tab_settings:
     )
     st.markdown('</div>', unsafe_allow_html=True)
     
-#GIAO DIỆN TAB
+# GIAO DIỆN CÁC TAB
 st.markdown("""
 <style>
 /* 1) Ẩn underline mặc định của st.tabs */
@@ -699,13 +699,11 @@ st.markdown("""
   display: none !important;
 }
 
-/* 2) Khoảng cách giữa các tab */
 .stTabs div[data-baseweb="tab-list"]{
   gap: .5rem !important;
   border-bottom: none !important;
 }
 
-/* 3) Mỗi tab = pill có viền bo tròn */
 .stTabs button[role="tab"],
 .stTabs div[data-baseweb="tab"] > button{
   background: var(--chip, #FFE8D9) !important;   /* pastel nhẹ */
@@ -717,20 +715,17 @@ st.markdown("""
   transition: transform .12s ease, filter .12s ease;
 }
 
-/* 4) Trạng thái hover */
 .stTabs button[role="tab"]:hover{
   filter: brightness(0.98) !important;
   transform: translateY(-1px);
 }
 
-/* 5) Tab đang chọn = pill đậm màu chính */
 .stTabs button[role="tab"][aria-selected="true"]{
   background: var(--primary, #FFB996) !important;   /* cam đào pastel đậm hơn */
   color: #fff !important;
   border-color: var(--primary, #FFB996) !important;
 }
 
-/* 6) Icon + chữ căn giữa đẹp */
 .stTabs button[role="tab"] > div{
   display: inline-flex; align-items: center; gap: .45rem;
 }
@@ -745,6 +740,7 @@ st.markdown("""
   <div style="font-size:15px; color:#64748b;">Ngọc Thảo – <a href=\"mailto:ms.nthaotran@gmail.com\">ms.nthaotran@gmail.com</a></div>
 </div>
 """, unsafe_allow_html=True)
+
 
 
 
