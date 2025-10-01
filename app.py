@@ -17,7 +17,7 @@ def get_secret(name, default=None):
 OPENAI_API_KEY    = get_secret("OPENAI_API_KEY")
 SUNO_API_KEY      = get_secret("SUNO_API_KEY")
 SUNO_API_BASE     = get_secret("SUNO_API_BASE", "https://api.sunoapi.org")
-SUNO_MODEL        = get_secret("SUNO_MODEL", "V4_5")
+SUNO_MODEL        = get_secret("SUNO_MODEL", "V5")
 SUNO_CALLBACK_URL = get_secret("SUNO_CALLBACK_URL")
 DEFAULT_SUNOSTYLE = get_secret("DEFAULT_SUNOSTYLE", "Kids, cheerful, playful, educational")
 
@@ -285,7 +285,7 @@ if "generated" not in st.session_state: st.session_state.generated = False
 # Sidebar
 with st.sidebar:
     st.markdown("## 👩‍🏫 Hướng dẫn nhanh")
-    st.markdown("- **Bước 1:** Nhập Miêu tả/Từ khóa/Title → **Tạo lời**.\n- **Bước 2:** Chỉnh tay hoặc **Refine**.\n- **Bước 3:** **Tạo nhạc**, xem ảnh bìa & tải file.\n- Xem lại ở **📚 Thư viện** hoặc **🗂️ Lịch sử**.")
+    st.markdown("- **Bước 1:** Nhập Miêu tả/Từ khóa/Title (GV có thể ghi tên câu chuyện/bài thơ và dùng từ khóa trong đó để gợi ý) → **Tạo lời**.\n- **Bước 2:** Chỉnh tay hoặc **Refine**.\n- **Bước 3:** **Tạo nhạc**, xem ảnh bìa & tải file.\n- Xem lại ở **📚 Thư viện** hoặc **🗂️ Lịch sử**.")
     st.divider()
     st.caption(f"Model Suno: **{SUNO_MODEL}**")
     st.caption(f"Style mặc định: **{DEFAULT_SUNOSTYLE}**")
@@ -607,6 +607,7 @@ st.markdown("""
   <div style="font-size:15px; color:#64748b;">Ngọc Thảo – <a href=\"mailto:ms.nthaotran@gmail.com\">ms.nthaotran@gmail.com</a></div>
 </div>
 """, unsafe_allow_html=True)
+
 
 
 
