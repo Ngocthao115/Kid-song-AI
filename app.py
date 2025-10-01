@@ -256,79 +256,115 @@ def load_history_df_supabase():
         return None
 
 # ================== 4) UI / THEME ==================
-import streamlit as st
-
 st.set_page_config(page_title="Kids Song AI", page_icon="🎵", layout="centered")
-
-# ⬇️ ĐẶT KHỐI NÀY CUỐI CÙNG trong phần UI để override sạch
 st.markdown("""
 <style>
-/* Font dễ thương, tròn */
+/* ====== Pastel Design Tokens ====== */
+:root{
+  --bg: #FFFFFF;                 /* nền chính (trắng) */
+  --bg-soft: #FFF6F1;            /* nền phụ (cam-đào) */
+  --primary: #FFB996;            /* cam-đào pastel (điểm nhấn) */
+  --primary-strong: #FFA97A;     /* hover/active */
+  --chip: #FDE3D6;               /* chip, badge */
+  --input: #F8FAFD;              /* nền input */
+  --text: #2D2D2D;               /* chữ chính */
+  --muted: #6B7280;              /* chữ phụ */
+  --ring: #FFD7C3;               /* viền focus */
+  --shadow: 0 10px 20px rgba(17,24,39,.07);
+}
+
 @import url('https://fonts.googleapis.com/css2?family=Fredoka:wght@400;600&display=swap');
-
-/* 1) NỀN TOÀN CỤC */
-html, body, .stApp {
-  background: #FFEFF6 !important;           /* hồng phấn rất nhạt */
-}
-
-/* 2) KHỐI NỘI DUNG CHÍNH */
-.main .block-container {
-  background: #FFFFFF !important;
-  border-radius: 16px !important;
-  padding: 2rem 2rem 3rem !important;
-  box-shadow: 0 10px 18px rgba(15,23,42,.06);
-}
-
-/* 3) SIDEBAR (nền phụ hồng đậm hơn) */
-section[data-testid="stSidebar"] > div {
-  background: #FFB6C1 !important;            /* hồng đậm hơn */
-}
-
-/* 4) KIỂU CHỮ TOÀN APP */
-html, body, [class*="css"], .stMarkdown, .stTextInput input,
-.stTextArea textarea, .stSelectbox, .stRadio label, .stSlider {
+html, body, .stApp, [class*="css"]{
   font-family: 'Fredoka', system-ui, -apple-system, "Segoe UI", Roboto, sans-serif !important;
-  color: #1F2335;
+  color: var(--text) !important;
 }
 
-/* 5) NÚT – selector mạnh cho mọi biến thể Streamlit */
+/* ====== Canvas & Layout ====== */
+.stApp{ background: var(--bg-soft) !important; }
+.main .block-container{
+  background: var(--bg) !important;
+  border-radius: 16px !important;
+  padding: 2rem !important;
+  box-shadow: var(--shadow);
+}
+
+/* Sidebar */
+section[data-testid="stSidebar"] > div{
+  background: var(--bg-soft) !important;
+}
+section[data-testid="stSidebar"] *{
+  color: var(--text) !important;
+}
+
+/* ====== Headings & Dividers ====== */
+h1,h2,h3{ color: var(--text) !important; }
+hr{ border: none; height:1px; background: var(--ring); }
+
+/* ====== Inputs (text/select/textarea) ====== */
+.stTextInput textarea, .stTextArea textarea,
+.stTextInput input, .stSelectbox div[data-baseweb="select"] > div,
+.stNumberInput input, .stDateInput input{
+  background: var(--input) !important;
+  border: 1px solid var(--ring) !important;
+  color: var(--text) !important;
+  border-radius: 12px !important;
+}
+.stTextInput:focus-within input,
+.stTextArea:focus-within textarea,
+.stSelectbox:focus-within div[data-baseweb="select"] > div{
+  box-shadow: 0 0 0 3px var(--ring) !important;
+}
+
+/* Placeholder dịu */
+::placeholder{ color: rgba(45,45,45,.45) !important; }
+
+/* ====== Buttons ====== */
 button[kind="primary"],
 button[data-testid="baseButton-primary"],
 div.stButton > button,
-div.stDownloadButton > button {
-  background-color: #FF69B4 !important;      /* hồng tươi – đẹp hơn xanh lá chói */
-  border-color: #FF69B4 !important;
-  color: #FFFFFF !important;
+div.stDownloadButton > button{
+  background: var(--primary) !important;
+  border-color: var(--primary) !important;
+  color: #fff !important;
   border-radius: 12px !important;
-  padding: 0.6rem 1.2rem !important;
+  padding: .6rem 1.2rem !important;
   font-weight: 600 !important;
   font-size: 16px !important;
   border: none !important;
-  box-shadow: 0 4px 8px rgba(0,0,0,0.12) !important;
+  box-shadow: 0 6px 12px rgba(255,185,150,.35) !important;
   transition: transform .15s ease, filter .15s ease;
 }
-button[kind="primary"]:hover,
-button[data-testid="baseButton-primary"]:hover,
-div.stButton > button:hover,
-div.stDownloadButton > button:hover {
-  filter: brightness(0.92) !important;
+button:hover{
+  background: var(--primary-strong) !important;
   transform: translateY(-1px);
 }
 
-/* 6) INPUT/PLACEHOLDER nhìn “dịu” */
-::placeholder {
-  color: rgba(31,35,53,.55) !important;
+/* Secondary buttons (nếu có) */
+button[data-testid="baseButton-secondary"]{
+  background: var(--chip) !important; color: var(--text) !important;
 }
 
-/* 7) BADGE/CARD nếu em có dùng class này */
-.badge { display:inline-flex; align-items:center; gap:.4rem;
-  padding:.35rem .7rem; border-radius:999px; background:#FCEFFF; color:#0E7490;
-  font-size:.8rem; font-weight:700; letter-spacing:.2px; }
-.card  { background:#fff; border-radius:16px; padding:1.1rem;
-  box-shadow:0 10px 18px rgba(15,23,42,.06); border:1px solid rgba(15,23,42,.06); }
+/* ====== Tabs / Chips / Badges ====== */
+div[data-baseweb="tab-highlight"]{ background: var(--primary) !important; }
+div[data-baseweb="tab-border"]{ background: transparent !important; }
+.badge{
+  display:inline-flex; align-items:center; gap:.35rem;
+  padding:.35rem .7rem; border-radius:999px;
+  background: var(--chip); color: var(--text); font-weight:600;
+}
+
+/* ====== Slider, Checkbox, Radio ====== */
+[data-baseweb="slider"] div[role="slider"]{ background: var(--primary) !important; }
+[data-baseweb="slider"] div[aria-hidden="true"]{ background: var(--ring) !important; }
+.stCheckbox > label > div:first-child,
+.stRadio > label > div:first-child{
+  border-color: var(--primary) !important;
+}
+
+/* ====== Progress/Alerts ====== */
+.stProgress > div > div{ background: var(--primary) !important; }
 </style>
 """, unsafe_allow_html=True)
-
 
 # State
 if "lyrics" not in st.session_state: st.session_state.lyrics = ""
@@ -662,6 +698,7 @@ st.markdown("""
   <div style="font-size:15px; color:#64748b;">Ngọc Thảo – <a href=\"mailto:ms.nthaotran@gmail.com\">ms.nthaotran@gmail.com</a></div>
 </div>
 """, unsafe_allow_html=True)
+
 
 
 
