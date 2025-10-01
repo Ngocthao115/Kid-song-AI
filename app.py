@@ -290,7 +290,7 @@ html, body, .stApp, [class*="css"]{
 
 /* Sidebar */
 section[data-testid="stSidebar"] > div{
-  background: var(--primary-soft) !important;
+  background: var(--primary) !important;
 }
 section[data-testid="stSidebar"] *{
   color: var(--text) !important;
@@ -698,6 +698,7 @@ st.markdown("""
   <div style="font-size:15px; color:#64748b;">Ngọc Thảo – <a href=\"mailto:ms.nthaotran@gmail.com\">ms.nthaotran@gmail.com</a></div>
 </div>
 """, unsafe_allow_html=True)
+
 
 
 
