@@ -265,7 +265,7 @@ st.markdown("""
   --bg-soft: #FFFFFF;            /* nền phụ (trắng) */
   --primary: #FFB996;            /* cam-đào pastel (điểm nhấn) */
   --primary-strong: #FFA97A;     /* hover/active */
-  --chip: #FDE3D6;               /* chip, badge */
+  --chip: #FFE8D9;               /* chip, badge */
   --input: #F8FAFD;              /* nền input */
   --text: #2D2D2D;               /* chữ chính */
   --muted: #6B7280;              /* chữ phụ */
@@ -290,7 +290,7 @@ html, body, .stApp, [class*="css"]{
 
 /* Sidebar */
 section[data-testid="stSidebar"] > div{
-  background: var(--primary) !important;
+  background: var(--chip) !important;
 }
 section[data-testid="stSidebar"] *{
   color: var(--text) !important;
